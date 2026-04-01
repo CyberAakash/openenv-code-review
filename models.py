@@ -1,6 +1,6 @@
 """Pydantic models for the Code Review OpenEnv environment."""
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -32,14 +32,22 @@ class CodeFinding(BaseModel):
 class CodeReviewAction(Action):
     """Action submitted by the agent each step.
 
-    The agent can either:
-    - Submit one or more findings (findings list is non-empty, done=False)
-    - Signal it is done reviewing (done=True, findings may be empty)
+    Supported action_type values:
+    - "review" (default): Submit findings for grading. Findings list may be non-empty.
+    - "request_hint": Ask for a hint about unfound issue categories.
+                      Costs -0.05 reward. No findings processed.
+    - "request_analysis": Run static analysis to reveal obvious issues.
+                          Costs -0.10 reward. Usable once per episode. No findings processed.
+    - "done" is signalled via the done=True flag (works with any action_type).
     """
 
+    action_type: str = Field(
+        default="review",
+        description="Action type: 'review', 'request_hint', or 'request_analysis'",
+    )
     findings: List[CodeFinding] = Field(
         default_factory=list,
-        description="List of code issues found in this step",
+        description="List of code issues found in this step (only used when action_type='review')",
     )
     done: bool = Field(
         default=False,
@@ -87,6 +95,18 @@ class CodeReviewObservation(Observation):
         default="",
         description="Per-step feedback from the grader (e.g. 'correct', 'duplicate', 'false positive')",
     )
+    hint: str = Field(
+        default="",
+        description="Hint about unfound issue categories (populated by request_hint action)",
+    )
+    analysis_result: str = Field(
+        default="",
+        description="Static analysis output revealing obvious issues (populated by request_analysis action)",
+    )
+    available_actions: List[str] = Field(
+        default_factory=lambda: ["review", "request_hint", "request_analysis"],
+        description="Action types still available in this episode",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -120,3 +140,7 @@ class EpisodeState(BaseModel):
     total_reward: float = 0.0
     done: bool = False
     last_feedback: str = ""
+    # Multi-step action tracking
+    hints_used: int = 0  # number of hints requested (max 3)
+    analysis_used: bool = False  # whether static analysis was already used
+    hint_categories_revealed: List[str] = Field(default_factory=list)

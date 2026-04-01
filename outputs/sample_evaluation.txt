@@ -1,0 +1,91 @@
+============================================================
+  Code Review Environment — Baseline Inference
+  Environment: http://localhost:7860
+  LLM API:    http://localhost:11434/v1
+  Model:      qwen2.5-coder:7b
+  Tasks:      3 tasks
+============================================================
+
+  Health check: 200
+
+============================================================
+  Task: easy_1
+============================================================
+  Episode ID: cf9a0328-bb9d-4ecb-961b-7dbcfa00cccb
+  Code snippet (259 chars, 17 lines)
+  Available actions: ['review', 'request_hint', 'request_analysis']
+
+  [Step 1] Querying qwen2.5-coder:7b for initial findings...
+  LLM returned 4 findings
+
+  Step 1: submitted 4 findings
+    Reward: +0.425 (total: 0.425)
+    Feedback: Line 3 (style): CORRECT (+0.175, base=0.075, bonus=+0.100) | Line 4 (style): CORRECT (+0.175, base=0.075, bonus=+0.100) | Line 5 (style): CORRECT (+0.
+
+  [Step 2] Sending done signal...
+    Final reward: 0.675
+    Feedback: Review complete. Matched 3/5 issues. Precision=0.75, Recall=0.60, F1=0.67. Efficiency bonus=+0.120. Total reward=0.675
+
+============================================================
+  Task: medium_1
+============================================================
+  Episode ID: 174d8835-1cd2-420f-9643-1dae55a6d110
+  Code snippet (585 chars, 29 lines)
+  Available actions: ['review', 'request_hint', 'request_analysis']
+
+  [Step 1] Querying qwen2.5-coder:7b for initial findings...
+  LLM returned 2 findings
+
+  Step 1: submitted 2 findings
+    Reward: +0.145 (total: 0.145)
+    Feedback: Line 4 (bug): CORRECT (+0.245, base=0.225, bonus=+0.020) | Line 12 (style): FALSE POSITIVE (-0.100)
+
+  [Step 2] Requesting hint...
+    Reward: -0.050 (total: 0.095)
+    Hint: There are 4 unfound issue(s) remaining: 4 bug issue(s). Severity breakdown: 1 medium, 3 high. Check around: lines 5-9, lines 18-21.
+
+  [Step 3] Refinement pass with hints/analysis...
+  LLM returned 4 additional findings
+
+  Step 3: submitted 4 additional + done
+    Reward: +0.805 (total: 0.900)
+    Feedback: Line 5 (bug): CORRECT (+0.225, base=0.225, bonus=+0.000) | Line 18 (bug): CORRECT (+0.285, base=0.225, bonus=+0.060) | Line 20 (bug): CORRECT (+0.150,
+
+============================================================
+  Task: hard_1
+============================================================
+  Episode ID: be39e109-8708-4ce1-bcc2-f89933b2bd03
+  Code snippet (689 chars, 29 lines)
+  Available actions: ['review', 'request_hint', 'request_analysis']
+
+  [Step 1] Querying qwen2.5-coder:7b for initial findings...
+  LLM returned 6 findings
+
+  Step 1: submitted 5 findings
+    Reward: +0.322 (total: 0.322)
+    Feedback: Line 3 (security): FALSE POSITIVE (-0.100) | Line 10 (security): CORRECT (+0.312, base=0.300, bonus=+0.013) | Line 13 (bug): FALSE POSITIVE (-0.100) |
+
+  Step 2: submitted 1 findings
+    Reward: +0.275 (total: 0.597)
+    Feedback: Line 24 (security): CORRECT (+0.275, base=0.225, bonus=+0.050)
+
+  [Step 3] Requesting hint...
+    Reward: -0.050 (total: 0.547)
+    Hint: There are 3 unfound issue(s) remaining: 3 security issue(s). Severity breakdown: 2 high, 1 critical. Check around: line 7, line 21, line 27.
+
+  [Step 4] Requesting static analysis...
+    Reward: -0.100 (total: 0.447)
+    Analysis: Static analysis results:
+  - Line 21: potential security issue (severity: high)
+  - Line 27: potential security issue (severity: high)
+
+  [Step 5] Refinement pass with hints/analysis...
+  LLM returned 2 additional findings
+
+  Step 5: submitted 2 additional + done
+    Reward: +0.736 (total: 1.183)
+    Feedback: Line 21 (security): CORRECT (+0.275, base=0.225, bonus=+0.050) | Line 27 (security): CORRECT (+0.286, base=0.225, bonus=+0.061) | Review complete. Mat
+
+============================================================
+  All episodes complete.
+============================================================

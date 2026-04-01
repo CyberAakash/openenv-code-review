@@ -174,6 +174,213 @@ print(multiply_list([1, 2, 3]))
             ),
         ],
     },
+    {
+        "task_id": "easy_4",
+        "difficulty": "easy",
+        "language": "python",
+        "code_snippet": """\
+import os
+import collections
+import csv
+import io
+import time
+
+class dataProcessor:
+    '''process data from csv files'''
+
+    def __init__(self, FilePath):
+        self.FilePath = FilePath
+        self._data = None
+
+    def LoadData(self):
+        f = open(self.FilePath, 'r')
+        reader = csv.reader(f)
+        self._data = list(reader)
+        # f is never closed
+
+    def getData(self):
+        return self._data
+
+    def processRows(self):
+        result = []
+        for i in range(0, len(self._data)):
+            Row = self._data[i]
+            processedRow = [x.strip() for x in Row]
+            result.append(processedRow)
+        return result
+
+    def SummaryStats(self):
+        n = len(self._data)
+        print("Total rows: " + str(n))
+        AVG_COLS = sum(len(row) for row in self._data) / n
+        print("Avg cols: " + str(AVG_COLS))
+
+def Main():
+    dp = dataProcessor("data.csv")
+    dp.LoadData()
+    dp.processRows()
+    dp.SummaryStats()
+
+Main()
+""",
+        "ground_truth": [
+            _issue(
+                2,
+                "style",
+                "low",
+                "Unused import: 'collections' is imported but never used",
+            ),
+            _issue(4, "style", "low", "Unused import: 'io' is imported but never used"),
+            _issue(
+                5, "style", "low", "Unused import: 'time' is imported but never used"
+            ),
+            _issue(
+                7,
+                "style",
+                "medium",
+                "Class name 'dataProcessor' should use PascalCase (PEP 8)",
+            ),
+            _issue(
+                14,
+                "style",
+                "low",
+                "Method name 'LoadData' should use snake_case (PEP 8)",
+            ),
+            _issue(
+                21,
+                "style",
+                "low",
+                "Method name 'getData' should use snake_case — use get_data (PEP 8)",
+            ),
+            _issue(
+                24,
+                "style",
+                "low",
+                "Method name 'processRows' should use snake_case (PEP 8)",
+            ),
+            _issue(
+                26, "style", "low", "Variable name 'Row' should be lowercase (PEP 8)"
+            ),
+            _issue(
+                31,
+                "style",
+                "low",
+                "Method name 'SummaryStats' should use snake_case (PEP 8)",
+            ),
+            _issue(
+                33,
+                "style",
+                "low",
+                "Variable name 'AVG_COLS' uses ALL_CAPS; should be lowercase for local variable",
+            ),
+            _issue(
+                36, "style", "low", "Function name 'Main' should use snake_case (PEP 8)"
+            ),
+        ],
+    },
+    {
+        "task_id": "easy_5",
+        "difficulty": "easy",
+        "language": "python",
+        "code_snippet": """\
+import os
+import sys
+import json
+import logging
+import re
+from typing import Dict, List, Tuple, Optional
+
+logger = logging.getLogger(__name__)
+
+def ReadConfig(filepath: str) -> Dict:
+    '''reads config from json file'''
+    with open(filepath) as F:
+        Data = json.load(F)
+    return Data
+
+def parse_Values(raw: str) -> List[int]:
+    items = raw.split(",")
+    Res = []
+    for Item in items:
+        val = int(Item.strip())
+        Res.append(val)
+    return Res
+
+class configManager:
+    MAX = 100
+    min = 0
+
+    def __init__(self, configPath):
+        self.configPath = configPath
+        self.Config = ReadConfig(configPath)
+
+    def GetValue(self, key: str):
+        return self.Config.get(key, None)
+
+    def set_value(self, key: str, val):
+        self.Config[key] = val
+
+    def SaveConfig(self):
+        with open(self.configPath, 'w') as f:
+            json.dump(self.Config, f, indent=2)
+
+cm = configManager("config.json")
+val = cm.GetValue("threshold")
+""",
+        "ground_truth": [
+            _issue(1, "style", "low", "Unused import: 'os' is imported but never used"),
+            _issue(
+                2, "style", "low", "Unused import: 'sys' is imported but never used"
+            ),
+            _issue(5, "style", "low", "Unused import: 're' is imported but never used"),
+            _issue(
+                10,
+                "style",
+                "low",
+                "Function name 'ReadConfig' should use snake_case (PEP 8)",
+            ),
+            _issue(12, "style", "low", "Variable name 'F' should be lowercase (PEP 8)"),
+            _issue(
+                13, "style", "low", "Variable name 'Data' should be lowercase (PEP 8)"
+            ),
+            _issue(
+                17,
+                "style",
+                "low",
+                "Function name 'parse_Values' has inconsistent casing; should be all snake_case",
+            ),
+            _issue(
+                19, "style", "low", "Variable name 'Res' should be lowercase (PEP 8)"
+            ),
+            _issue(
+                20, "style", "low", "Variable name 'Item' should be lowercase (PEP 8)"
+            ),
+            _issue(
+                24,
+                "style",
+                "medium",
+                "Class name 'configManager' should use PascalCase (PEP 8)",
+            ),
+            _issue(
+                26,
+                "style",
+                "medium",
+                "Inconsistent constant naming: 'min' should be uppercase MIN for a class constant",
+            ),
+            _issue(
+                32,
+                "style",
+                "low",
+                "Method name 'GetValue' should use snake_case (PEP 8)",
+            ),
+            _issue(
+                38,
+                "style",
+                "low",
+                "Method name 'SaveConfig' should use snake_case (PEP 8)",
+            ),
+        ],
+    },
 ]
 
 
@@ -382,6 +589,210 @@ def clamp(value, min, max):
                 "bug",
                 "low",
                 "Shadowing built-ins: parameters 'min' and 'max' shadow Python built-in functions",
+            ),
+        ],
+    },
+    {
+        "task_id": "medium_4",
+        "difficulty": "medium",
+        "language": "python",
+        "code_snippet": """\
+import threading
+
+class BankAccount:
+    def __init__(self, balance=0):
+        self.balance = balance
+
+    def deposit(self, amount):
+        self.balance += amount
+        return self.balance
+
+    def withdraw(self, amount):
+        self.balance -= amount
+        return self.balance
+
+    def transfer(self, other, amount):
+        self.withdraw(amount)
+        other.deposit(amount)
+
+def calculate_discount(price, discount_percent):
+    if discount_percent > 1.0:
+        discount_percent = discount_percent / 100
+    final = price - price * discount_percent
+    return round(final)
+
+def find_element(matrix, target):
+    for i in range(len(matrix)):
+        for j in range(len(matrix[0])):
+            if matrix[i][j] == target:
+                return (i, j)
+
+def parse_csv_line(line):
+    return line.split(",")
+
+def cumulative_sum(numbers):
+    result = []
+    running = 0
+    for n in numbers:
+        running += n
+    result.append(running)
+    return result
+
+def intersect_lists(a, b):
+    result = []
+    for item in a:
+        if item in b:
+            result.append(item)
+    return result
+""",
+        "ground_truth": [
+            _issue(
+                8,
+                "bug",
+                "high",
+                "Race condition: balance += amount is not thread-safe; needs a lock for concurrent access",
+            ),
+            _issue(
+                12,
+                "bug",
+                "high",
+                "No balance check: withdraw allows negative balance; should verify sufficient funds",
+            ),
+            _issue(
+                16,
+                "bug",
+                "high",
+                "Non-atomic transfer: if deposit fails after withdraw, money is lost; needs transaction/lock",
+            ),
+            _issue(
+                24,
+                "bug",
+                "medium",
+                "Rounding error: round(final) rounds to integer losing cents; use round(final, 2) for currency",
+            ),
+            _issue(
+                27,
+                "bug",
+                "medium",
+                "Assumes uniform row length: len(matrix[0]) will fail on empty matrix or jagged arrays",
+            ),
+            _issue(
+                32,
+                "bug",
+                "medium",
+                "Naive CSV parsing: split(',') fails on quoted fields containing commas; use csv module",
+            ),
+            _issue(
+                38,
+                "bug",
+                "high",
+                "Wrong indentation: result.append is outside the loop, only appends final sum instead of cumulative sums",
+            ),
+            _issue(
+                42,
+                "bug",
+                "medium",
+                "Duplicates not handled: if item appears multiple times in both lists, duplicates are included in result",
+            ),
+        ],
+    },
+    {
+        "task_id": "medium_5",
+        "difficulty": "medium",
+        "language": "python",
+        "code_snippet": """\
+from datetime import datetime, timedelta
+
+class Cache:
+    def __init__(self, ttl_seconds=300):
+        self._store = {}
+        self._ttl = ttl_seconds
+
+    def get(self, key):
+        if key in self._store:
+            return self._store[key]["value"]
+        return None
+
+    def set(self, key, value):
+        self._store[key] = {
+            "value": value,
+            "expires": datetime.now() + timedelta(seconds=self._ttl)
+        }
+
+    def clear_expired(self):
+        for key in self._store:
+            if self._store[key]["expires"] < datetime.now():
+                del self._store[key]
+
+def levenshtein(s1, s2):
+    if len(s1) == 0:
+        return len(s2)
+    if len(s2) == 0:
+        return len(s1)
+
+    matrix = [[0] * (len(s2) + 1)] * (len(s1) + 1)
+
+    for i in range(len(s1) + 1):
+        matrix[i][0] = i
+    for j in range(len(s2) + 1):
+        matrix[0][j] = j
+
+    for i in range(1, len(s1) + 1):
+        for j in range(1, len(s2) + 1):
+            cost = 0 if s1[i-1] == s2[j-1] else 1
+            matrix[i][j] = min(
+                matrix[i-1][j] + 1,
+                matrix[i][j-1] + 1,
+                matrix[i-1][j-1] + cost
+            )
+    return matrix[len(s1)][len(s2)]
+
+def moving_average(data, window):
+    result = []
+    for i in range(len(data)):
+        chunk = data[i:i+window]
+        result.append(sum(chunk) / window)
+    return result
+
+def group_by(items, key_func):
+    groups = {}
+    for item in items:
+        key = key_func(item)
+        if key not in groups:
+            groups[key] = []
+        groups[key] = groups[key].append(item)
+    return groups
+""",
+        "ground_truth": [
+            _issue(
+                10,
+                "bug",
+                "high",
+                "TTL not enforced on read: get() returns expired entries without checking expiration time",
+            ),
+            _issue(
+                20,
+                "bug",
+                "high",
+                "Dict mutation during iteration: deleting keys from self._store while iterating causes RuntimeError",
+            ),
+            _issue(
+                31,
+                "bug",
+                "critical",
+                "Shallow copy trap: [[0] * cols] * rows creates rows that share the same list object; use list comprehension",
+            ),
+            _issue(
+                50,
+                "bug",
+                "medium",
+                "Incomplete window: near the end of data, chunk is smaller than window causing incorrect average divisor",
+            ),
+            _issue(
+                57,
+                "bug",
+                "high",
+                "list.append returns None: 'groups[key] = groups[key].append(item)' sets the value to None; use just groups[key].append(item)",
             ),
         ],
     },
@@ -598,7 +1009,7 @@ def process_user_input(data_str):
                 11,
                 "security",
                 "critical",
-                "Hardcoded secret: GitHub personal access token in source code",
+                "Hardcoded secret: API secret key embedded in source code",
             ),
             _issue(
                 14,
@@ -635,6 +1046,303 @@ def process_user_input(data_str):
                 "security",
                 "critical",
                 "Code injection: 'eval(data_str)' on untrusted input allows arbitrary code execution",
+            ),
+        ],
+    },
+    {
+        "task_id": "hard_4",
+        "difficulty": "hard",
+        "language": "python",
+        "code_snippet": """\
+import os
+import jwt
+import sqlite3
+import hashlib
+import smtplib
+from email.mime.text import MIMEText
+import json
+import base64
+import logging
+
+logger = logging.getLogger(__name__)
+
+JWT_SECRET = "change-me-in-production-12345"
+ADMIN_EMAIL = "admin@company.com"
+SMTP_PASSWORD = "email-password-not-for-production"
+
+def create_jwt(user_id, role):
+    payload = {
+        "user_id": user_id,
+        "role": role,
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm="none")
+
+def verify_jwt(token):
+    try:
+        return jwt.decode(token, JWT_SECRET, algorithms=["none", "HS256"])
+    except:
+        return None
+
+def get_user_orders(user_id):
+    conn = sqlite3.connect("shop.db")
+    cursor = conn.cursor()
+    cursor.execute(f"SELECT * FROM orders WHERE user_id = {user_id}")
+    return cursor.fetchall()
+
+def reset_password(email, new_password):
+    hashed = hashlib.sha1(new_password.encode()).hexdigest()
+    conn = sqlite3.connect("shop.db")
+    conn.execute(
+        f"UPDATE users SET password = '{hashed}' WHERE email = '{email}'"
+    )
+    conn.commit()
+
+def send_notification(to_email, message):
+    msg = MIMEText(message)
+    msg["Subject"] = "Notification"
+    msg["From"] = ADMIN_EMAIL
+    msg["To"] = to_email
+    server = smtplib.SMTP("smtp.company.com", 587)
+    server.login(ADMIN_EMAIL, SMTP_PASSWORD)
+    server.sendmail(ADMIN_EMAIL, to_email, msg.as_string())
+
+def decode_user_data(encoded_str):
+    decoded = base64.b64decode(encoded_str)
+    return eval(decoded.decode("utf-8"))
+
+def check_permission(user, resource):
+    if user.get("role") == "admin":
+        return True
+    if user.get("user_id") == resource.get("owner_id"):
+        return True
+    logger.debug(f"Access denied for user {user} on resource {resource}")
+    return False
+""",
+        "ground_truth": [
+            _issue(
+                13,
+                "security",
+                "critical",
+                "Hardcoded JWT secret: secret key in source code should be loaded from environment variables",
+            ),
+            _issue(
+                15,
+                "security",
+                "critical",
+                "Hardcoded SMTP password: email credentials in source code",
+            ),
+            _issue(
+                22,
+                "security",
+                "critical",
+                "JWT algorithm 'none': signing with algorithm='none' produces unsigned tokens anyone can forge",
+            ),
+            _issue(
+                26,
+                "security",
+                "critical",
+                "JWT algorithms list includes 'none': allows attackers to submit unsigned tokens that will be accepted",
+            ),
+            _issue(
+                33,
+                "security",
+                "critical",
+                "SQL injection: f-string with user_id in query allows SQL injection; use parameterised queries",
+            ),
+            _issue(
+                37,
+                "security",
+                "high",
+                "Weak hash: SHA-1 is cryptographically broken for password hashing; use bcrypt or argon2",
+            ),
+            _issue(
+                40,
+                "security",
+                "critical",
+                "SQL injection: f-string in UPDATE query with email and hashed password; use parameterised queries",
+            ),
+            _issue(
+                49,
+                "security",
+                "high",
+                "Unencrypted SMTP: connecting without STARTTLS sends credentials in plaintext; call server.starttls() first",
+            ),
+            _issue(
+                53,
+                "security",
+                "critical",
+                "Code injection: eval() on decoded user data allows arbitrary code execution",
+            ),
+            _issue(
+                58,
+                "security",
+                "medium",
+                "Sensitive data in logs: logging full user dict may expose passwords/tokens in debug logs",
+            ),
+        ],
+    },
+    {
+        "task_id": "hard_5",
+        "difficulty": "hard",
+        "language": "python",
+        "code_snippet": """\
+import os
+import re
+import json
+import sqlite3
+import hashlib
+import hmac
+import secrets
+import subprocess
+from http.server import BaseHTTPRequestHandler
+from urllib.parse import parse_qs, urlparse
+import xml.etree.ElementTree as ET
+
+WEBHOOK_SECRET = "webhook-shared-secret-do-not-leak"
+DATABASE_URL = "postgresql://admin:db-pass-12345@prod-db.internal:5432/app"
+
+class RequestHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        parsed = urlparse(self.path)
+        params = parse_qs(parsed.query)
+
+        if parsed.path == "/user":
+            user_id = params.get("id", [""])[0]
+            conn = sqlite3.connect("app.db")
+            result = conn.execute(
+                "SELECT * FROM users WHERE id = " + user_id
+            ).fetchone()
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode())
+
+        elif parsed.path == "/search":
+            query = params.get("q", [""])[0]
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(f"<html><body>Results for: {query}</body></html>".encode())
+
+        elif parsed.path == "/file":
+            filename = params.get("name", [""])[0]
+            filepath = os.path.join("/uploads", filename)
+            with open(filepath, "rb") as f:
+                data = f.read()
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(data)
+
+        elif parsed.path == "/export":
+            fmt = params.get("format", ["json"])[0]
+            cmd = f"export_tool --format {fmt} --output /tmp/export"
+            subprocess.call(cmd, shell=True)
+            self.send_response(200)
+            self.end_headers()
+
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(length).decode()
+
+        if self.path == "/webhook":
+            data = json.loads(body)
+            self._process_webhook(data)
+
+        elif self.path == "/upload-xml":
+            root = ET.fromstring(body)
+            self._process_xml(root)
+
+        elif self.path == "/login":
+            creds = json.loads(body)
+            password_hash = hashlib.md5(creds["password"].encode()).hexdigest()
+            conn = sqlite3.connect("app.db")
+            user = conn.execute(
+                f"SELECT * FROM users WHERE username = '{creds['username']}' "
+                f"AND password = '{password_hash}'"
+            ).fetchone()
+            if user:
+                token = secrets.token_hex(16)
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(json.dumps({"token": token}).encode())
+            else:
+                self.send_response(401)
+                self.end_headers()
+
+    def _process_webhook(self, data):
+        # No signature verification
+        action = data.get("action")
+        if action:
+            os.system(f"process_webhook --action {action}")
+
+    def _process_xml(self, root):
+        for elem in root.iter():
+            print(elem.tag, elem.text)
+""",
+        "ground_truth": [
+            _issue(
+                13,
+                "security",
+                "critical",
+                "Hardcoded webhook secret: shared secret in source code should use environment variables",
+            ),
+            _issue(
+                14,
+                "security",
+                "critical",
+                "Hardcoded database URL with credentials: database password exposed in source code",
+            ),
+            _issue(
+                25,
+                "security",
+                "critical",
+                "SQL injection: string concatenation with user_id in SQL query; use parameterised queries",
+            ),
+            _issue(
+                34,
+                "security",
+                "high",
+                "Reflected XSS: user query parameter rendered directly into HTML response without escaping",
+            ),
+            _issue(
+                39,
+                "security",
+                "high",
+                "Path traversal: user-controlled filename in os.path.join allows reading arbitrary files with '../'",
+            ),
+            _issue(
+                46,
+                "security",
+                "critical",
+                "Command injection: user-controlled format parameter in shell command; use subprocess with list args",
+            ),
+            _issue(
+                60,
+                "security",
+                "high",
+                "XXE vulnerability: ET.fromstring on untrusted XML without disabling external entities; use defusedxml",
+            ),
+            _issue(
+                64,
+                "security",
+                "high",
+                "Weak password hashing: MD5 is cryptographically broken for passwords; use bcrypt or argon2",
+            ),
+            _issue(
+                66,
+                "security",
+                "critical",
+                "SQL injection: f-string with username and password in login query; use parameterised queries",
+            ),
+            _issue(
+                78,
+                "security",
+                "critical",
+                "Missing webhook signature verification: webhook data is processed without HMAC verification",
+            ),
+            _issue(
+                80,
+                "security",
+                "critical",
+                "Command injection: os.system with user-controlled action from webhook data; use subprocess with list args",
             ),
         ],
     },
