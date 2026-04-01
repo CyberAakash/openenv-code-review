@@ -9,7 +9,48 @@ app_port: 7860
 
 # Code Review OpenEnv Environment
 
-An OpenEnv RL environment where an AI agent reviews Python code snippets and identifies issues across three difficulty levels. Features multi-step interaction with exploration vs. exploitation tradeoffs.
+An OpenEnv RL environment where an AI agent reviews Python code snippets and identifies issues — style violations, logic bugs, and security vulnerabilities — across three difficulty levels. Features multi-step interaction with exploration vs. exploitation tradeoffs and a cyber-themed web UI for visualization and interactive play.
+
+**Built for the [OpenEnv Round 1 Bootcamp Hackathon](https://openenv.ai)**
+
+## Team TRIOZ
+
+| Member | Email | Role |
+|--------|-------|------|
+| Santhosh | santhoshmetheofficial@gmail.com | Team Lead |
+| Aakash T | aakashvnth@gmail.com | Member |
+| Sriram | sriramsrit.2002@gmail.com | Member |
+
+## Live Demo
+
+- **HF Space**: [https://huggingface.co/spaces/CyberAakash/code-review](https://huggingface.co/spaces/CyberAakash/code-review)
+- **API Endpoint**: `https://CyberAakash-code-review.hf.space`
+- **GitHub**: [https://github.com/CyberAakash/openenv-code-review](https://github.com/CyberAakash/openenv-code-review)
+
+---
+
+## Features
+
+### Core Environment
+- **15 tasks** across 3 difficulty levels (easy/medium/hard)
+- **3 action types** per step: `review`, `request_hint`, `request_analysis` — creating an exploration vs. exploitation tradeoff
+- **Rich grading system**: line-number matching (+-2 tolerance), issue type matching, description keyword similarity, severity accuracy, F1 scoring, step efficiency bonus
+- **Multi-step episodes**: up to 10 steps per episode with cumulative reward tracking
+- **Full OpenEnv spec compliance**: passes `openenv validate` on all 4 deployment modes
+
+### Web UI (Cyber-Themed Dashboard)
+- **Skeuomorphic dark theme**: `#222222` background with `#89E900` cyber green accents, scanlines, grid overlay, raised panels, inset shadows, glowing elements
+- **Dashboard Tab**: Select any of the 15 tasks, run an automated agent simulation, watch step-by-step episode replay with code highlighting, reward tracking, and grading breakdown
+- **Playground Tab**: Play as the AI agent yourself — click code lines to report issues, pick type/severity, request hints (-0.05 cost) and analysis (-0.10 cost), finalize and see your score
+- **Responsive design**: works on desktop and mobile
+- **Live health indicator**: auto-polls server status every 15 seconds
+
+### Baseline Inference
+- Strategic multi-step inference script using OpenAI-compatible LLMs
+- Initial review -> hint for medium/hard -> analysis for hard -> refinement pass
+- Runs within hackathon constraints (vcpu=2, memory=8gb, <20min)
+
+---
 
 ## Tasks
 
@@ -17,13 +58,11 @@ An OpenEnv RL environment where an AI agent reviews Python code snippets and ide
 
 | Difficulty | Task IDs | Issue Types | Issues per Snippet |
 |-----------|----------|-------------|-------------------|
-| Easy (5) | easy_1 — easy_5 | Style & syntax (unused imports, naming, magic numbers) | 4-13 |
-| Medium (5) | medium_1 — medium_5 | Logic bugs (off-by-one, wrong operators, missing checks) | 4-8 |
-| Hard (5) | hard_1 — hard_5 | Security vulnerabilities (SQL injection, command injection, hardcoded secrets) | 6-11 |
+| Easy (5) | easy_1 -- easy_5 | Style & syntax (unused imports, naming, magic numbers) | 4-13 |
+| Medium (5) | medium_1 -- medium_5 | Logic bugs (off-by-one, wrong operators, missing checks) | 4-8 |
+| Hard (5) | hard_1 -- hard_5 | Security vulnerabilities (SQL injection, command injection, hardcoded secrets) | 6-11 |
 
 ## Multi-Step Action Types
-
-The agent can choose from three action types each step, creating an exploration vs. exploitation tradeoff:
 
 | Action Type | Cost | Effect | Limit |
 |------------|------|--------|-------|
@@ -31,14 +70,127 @@ The agent can choose from three action types each step, creating an exploration 
 | `request_hint` | -0.05 reward | Reveals unfound issue categories + approximate line ranges | 3 per episode |
 | `request_analysis` | -0.10 reward | Simulated static analysis revealing 2 obvious issues | 1 per episode |
 
-## API
+---
 
-Standard OpenEnv endpoints:
+## Quick Start
 
-- `POST /reset` — Start a new episode. Body: `{"task_id": "easy_1"}`
-- `POST /step` — Submit action. Body: `{"action": {"action_type": "review", "findings": [...], "done": false, "metadata": {"episode_id": "..."}}}`
-- `GET /health` — Health check
-- `GET /schema` — Action/Observation schemas
+### Prerequisites
+
+- Python 3.10+
+- [uv](https://docs.astral.sh/uv/) (recommended) or pip
+
+### Install & Run Locally
+
+```bash
+# Clone the repo
+git clone https://github.com/CyberAakash/openenv-code-review.git
+cd openenv-code-review
+
+# Install dependencies with uv
+uv sync
+
+# Start the server
+uv run python -m server.app
+```
+
+The server starts at `http://localhost:7860`.
+
+### Access the Web UI
+
+Open your browser and go to:
+
+- **Web UI**: [http://localhost:7860/ui/](http://localhost:7860/ui/)
+- **Root** (`http://localhost:7860/`) auto-redirects to the UI
+
+#### Dashboard Tab
+1. Select a task from the dropdown (organized by difficulty)
+2. Click **"Run Agent Simulation"**
+3. Watch the step-by-step episode replay with code highlighting, reward bar, and grading breakdown
+
+#### Playground Tab
+1. Select a task and click **"Start Review"**
+2. Click on code lines to report issues
+3. Fill in issue type (style/bug/security), severity, and description
+4. Click **"Submit Finding"** to send it to the grader
+5. Use **"Request Hint"** (-0.05) or **"Request Analysis"** (-0.10) for help
+6. Click **"Finalize"** when done to see your final score
+
+### Test API Endpoints
+
+```bash
+# Health check
+curl http://localhost:7860/health
+
+# Reset (start an episode)
+curl -X POST http://localhost:7860/reset \
+  -H "Content-Type: application/json" \
+  -d '{"task_id": "easy_1"}'
+
+# Submit a finding
+curl -X POST http://localhost:7860/step \
+  -H "Content-Type: application/json" \
+  -d '{
+    "action": {
+      "action_type": "review",
+      "findings": [{
+        "line_number": 2,
+        "issue_type": "style",
+        "severity": "low",
+        "description": "Unused import: sys"
+      }],
+      "done": false,
+      "metadata": {"episode_id": "YOUR_EPISODE_ID"}
+    }
+  }'
+
+# Get schema
+curl http://localhost:7860/schema
+```
+
+### Run Baseline Inference
+
+```bash
+# Set environment variables
+export API_BASE_URL="https://api.openai.com/v1"   # LLM endpoint
+export MODEL_NAME="gpt-4o-mini"                     # Model identifier
+export HF_TOKEN="your-api-key"                      # API key for the LLM
+
+# Run inference (server must be running separately)
+export ENV_URL="http://localhost:7860"
+uv run python inference.py
+```
+
+### Docker
+
+```bash
+docker build -t code-review-env .
+docker run -p 7860:7860 code-review-env
+```
+
+### Validate
+
+```bash
+# Local validation (all 4 deployment modes)
+uv run openenv validate
+
+# Remote validation against live HF Space
+uv run openenv validate --url https://CyberAakash-code-review.hf.space
+```
+
+---
+
+## API Reference
+
+### Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/health` | Health check |
+| `GET` | `/schema` | Action/Observation JSON schemas |
+| `GET` | `/metadata` | Environment metadata |
+| `POST` | `/reset` | Start a new episode |
+| `POST` | `/step` | Submit an action |
+| `GET` | `/state` | Get current server-side state |
 
 ### Action Format
 
@@ -58,57 +210,78 @@ Standard OpenEnv endpoints:
 }
 ```
 
+### Observation Format
+
+```json
+{
+  "episode_id": "uuid",
+  "code_snippet": "import os\n...",
+  "task_id": "easy_1",
+  "language": "python",
+  "step_number": 1,
+  "max_steps": 10,
+  "findings_so_far": 2,
+  "feedback": "Correct: matched ground truth issue",
+  "hint": "",
+  "analysis_result": "",
+  "available_actions": ["review", "request_hint", "request_analysis"]
+}
+```
+
 ### Reward Design
 
-- **Correct finding**: `+0.15 * severity_weight` (low=0.5, med=1.0, high=1.5, critical=2.0)
-- **Description accuracy bonus**: up to `+0.05` for keyword overlap with ground truth
-- **Severity accuracy bonus**: `+0.05` (exact match), `0.0` (off by one), `-0.02` (off by two+)
-- **Duplicate**: `0.0`
-- **False positive**: `-0.1`
-- **Done bonus**: `+0.3 * recall - 0.05 * false_positive_count`
-- **Step efficiency bonus**: up to `+0.15` (linear decay with steps used)
-- **Hint cost**: `-0.05` per hint
-- **Analysis cost**: `-0.10` per analysis
+| Event | Reward |
+|-------|--------|
+| Correct finding | `+0.15 * severity_weight` (low=0.5, med=1.0, high=1.5, critical=2.0) |
+| Description accuracy bonus | up to `+0.05` for keyword overlap with ground truth |
+| Severity accuracy bonus | `+0.05` (exact), `0.0` (off by one), `-0.02` (off by two+) |
+| Duplicate finding | `0.0` |
+| False positive | `-0.1` |
+| Done bonus | `+0.3 * recall - 0.05 * false_positive_count` |
+| Step efficiency bonus | up to `+0.15` (linear decay with steps used) |
+| Hint cost | `-0.05` per hint (max 3) |
+| Analysis cost | `-0.10` (max 1) |
 
-### Grading
-
-Line-number matching within +/-2 lines tolerance, exact `issue_type` match, description keyword similarity, severity accuracy. Final score includes F1 of precision and recall.
-
-## Quick Start
-
-```bash
-# Install dependencies
-pip install -e .
-
-# Run the server
-uvicorn server.app:app --host 0.0.0.0 --port 7860
-
-# Run baseline inference
-export API_BASE_URL="https://api.openai.com/v1"
-export MODEL_NAME="gpt-4o-mini"
-export HF_TOKEN="your-api-key"
-python inference.py
-```
-
-## Docker
-
-```bash
-docker build -t code-review-env .
-docker run -p 7860:7860 code-review-env
-```
+---
 
 ## Project Structure
 
 ```
+openenv-code-review/
 ├── models.py                          # Pydantic models (Action, Observation, State)
 ├── client.py                          # EnvClient subclass
 ├── inference.py                       # Baseline LLM inference with multi-step strategy
 ├── openenv.yaml                       # OpenEnv manifest
-├── pyproject.toml                     # Dependencies
-├── Dockerfile                         # Container config
-├── outputs/                           # Sample evaluation results
+├── pyproject.toml                     # Dependencies & scripts
+├── uv.lock                           # Locked dependencies
+├── Dockerfile                         # Container config (python:3.11-slim, port 7860)
+├── .env.example                       # Environment variable documentation
+├── static/                            # Web UI (plain HTML/CSS/JS, no frameworks)
+│   ├── index.html                     # Main page: Dashboard + Playground tabs
+│   ├── css/
+│   │   └── style.css                  # Cyber skeuomorphic theme
+│   └── js/
+│       ├── api.js                     # Shared API client (reset, step, hint, analysis)
+│       ├── dashboard.js               # Agent simulation viewer
+│       └── playground.js              # Interactive code review game
+├── outputs/
+│   └── sample_evaluation.txt          # Sample inference run output
 └── server/
-    ├── app.py                         # FastAPI app
-    ├── code_review_environment.py     # Environment implementation (3 action types, improved grading)
-    └── tasks.py                       # Task definitions (15 tasks, 5 per difficulty)
+    ├── __init__.py
+    ├── app.py                         # FastAPI app + static file mount at /ui
+    ├── code_review_environment.py     # Environment (3 action types, grading engine)
+    └── tasks.py                       # 15 task definitions (5 per difficulty)
 ```
+
+---
+
+## Tech Stack
+
+- **Backend**: Python, FastAPI, Pydantic, OpenEnv Core SDK
+- **Frontend**: Plain HTML5, CSS3, JavaScript (no frameworks, no build step)
+- **Deployment**: Docker, Hugging Face Spaces
+- **Inference**: OpenAI-compatible API client
+
+## License
+
+Built for the OpenEnv Hackathon. MIT License.

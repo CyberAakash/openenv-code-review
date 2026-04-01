@@ -19,6 +19,19 @@ const API = (() => {
     return resp.json();
   }
 
+  /**
+   * Flatten the OpenEnv response envelope.
+   * Server returns: { observation: {...}, reward: 0.0, done: false }
+   * We flatten to:  { ...observation, reward: 0.0, done: false }
+   * so consumers can simply use resp.episode_id, resp.reward, etc.
+   */
+  function _flatten(raw) {
+    if (raw && raw.observation) {
+      return { ...raw.observation, reward: raw.reward, done: raw.done };
+    }
+    return raw;
+  }
+
   return {
     /** Health check */
     async health() {
@@ -32,18 +45,20 @@ const API = (() => {
 
     /** Reset environment for a given task */
     async reset(taskId) {
-      return _fetch('/reset', {
+      const raw = await _fetch('/reset', {
         method: 'POST',
         body: JSON.stringify({ task_id: taskId }),
       });
+      return _flatten(raw);
     },
 
     /** Submit a step action */
     async step(action) {
-      return _fetch('/step', {
+      const raw = await _fetch('/step', {
         method: 'POST',
         body: JSON.stringify({ action }),
       });
+      return _flatten(raw);
     },
 
     /** Convenience: submit review findings */
