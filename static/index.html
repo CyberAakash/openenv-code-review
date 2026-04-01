@@ -46,6 +46,84 @@
       <button class="btn btn-secondary" id="dashResetBtn" disabled>
         Reset
       </button>
+      <button class="settings-toggle" id="dashSettingsToggle">
+        <span class="arrow">&#9654;</span> Settings
+      </button>
+      <span class="mode-badge heuristic" id="dashModeBadge">Heuristic</span>
+    </div>
+
+    <!-- Settings panel (collapsible) -->
+    <div class="settings-panel" id="dashSettingsPanel">
+      <div class="settings-grid">
+        <!-- Left: Heuristic settings -->
+        <div class="settings-section">
+          <div class="settings-section-title">Simulation Tuning</div>
+
+          <div class="slider-row">
+            <div class="slider-header">
+              <span class="toggle-label">Randomness</span>
+              <span class="slider-value" id="dashRandomnessLabel">Balanced</span>
+            </div>
+            <input type="range" id="dashRandomness" min="0" max="2" step="1" value="1" />
+          </div>
+
+          <div class="toggle-row">
+            <span class="toggle-label">Include false positives</span>
+            <label class="toggle-switch">
+              <input type="checkbox" id="dashFalsePositives" checked />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+
+          <div class="toggle-row">
+            <span class="toggle-label">Use hints</span>
+            <label class="toggle-switch">
+              <input type="checkbox" id="dashUseHints" checked />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+
+          <div class="toggle-row">
+            <span class="toggle-label">Use analysis</span>
+            <label class="toggle-switch">
+              <input type="checkbox" id="dashUseAnalysis" checked />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Right: LLM settings -->
+        <div class="settings-section">
+          <div class="settings-section-title">LLM Mode (Advanced)</div>
+
+          <div class="toggle-row">
+            <span class="toggle-label">Use LLM for findings</span>
+            <label class="toggle-switch">
+              <input type="checkbox" id="dashUseLLM" />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+
+          <div class="llm-config" id="dashLLMConfig">
+            <div class="form-group">
+              <label class="form-label" for="dashLLMUrl">API Base URL</label>
+              <input class="form-input" id="dashLLMUrl" type="text"
+                     placeholder="https://api.openai.com/v1" />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="dashLLMKey">API Key</label>
+              <input class="form-input" id="dashLLMKey" type="password"
+                     placeholder="sk-..." />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="dashLLMModel">Model</label>
+              <input class="form-input" id="dashLLMModel" type="text"
+                     placeholder="gpt-4o-mini" value="gpt-4o-mini" />
+            </div>
+            <div class="llm-status" id="dashLLMStatus" style="display:none;"></div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div class="main-grid">
