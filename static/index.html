@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Code Review // OpenEnv</title>
+  <link rel="stylesheet" href="/ui/css/style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>&#x1f50d;</text></svg>" />
+</head>
+<body>
+
+  <!-- ═══════════ HEADER ═══════════ -->
+  <header class="header">
+    <div class="header-brand">
+      <div class="header-logo">&gt;_</div>
+      <div>
+        <div class="header-title">Code Review</div>
+        <div class="header-subtitle">OpenEnv RL Environment</div>
+      </div>
+    </div>
+    <div class="header-status">
+      <span class="status-dot" id="statusDot"></span>
+      <span id="statusText">Connecting...</span>
+    </div>
+  </header>
+
+  <!-- ═══════════ TABS ═══════════ -->
+  <nav class="tab-nav">
+    <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
+    <button class="tab-btn" data-tab="playground">Playground</button>
+  </nav>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       TAB 1 — DASHBOARD  (read-only agent simulation viewer)
+       ═══════════════════════════════════════════════════════════════ -->
+  <section class="tab-content active" id="tab-dashboard">
+    <!-- Controls row -->
+    <div style="display:flex; gap:12px; align-items:flex-end; margin-bottom:16px; flex-wrap:wrap;">
+      <div class="form-group" style="margin-bottom:0; min-width:200px; flex:1; max-width:320px;">
+        <label class="form-label" for="dashTaskSelect">Task</label>
+        <select class="form-select" id="dashTaskSelect"></select>
+      </div>
+      <button class="btn btn-primary" id="dashRunBtn">
+        Run Agent Simulation
+      </button>
+      <button class="btn btn-secondary" id="dashResetBtn" disabled>
+        Reset
+      </button>
+    </div>
+
+    <div class="main-grid">
+      <!-- Left column: code viewer -->
+      <div>
+        <div class="panel" id="dashCodePanel">
+          <div class="panel-header">
+            <span>Source Code</span>
+            <span class="badge" id="dashTaskBadge">--</span>
+          </div>
+          <div class="panel-body panel-inset">
+            <div class="code-viewer" id="dashCodeViewer">
+              <div class="empty-state">
+                <div class="empty-icon">&#128196;</div>
+                Select a task and run the simulation
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Grading breakdown (shown after simulation) -->
+        <div class="panel" style="margin-top:16px; display:none;" id="dashGradingPanel">
+          <div class="panel-header">
+            <span>Grading Breakdown</span>
+          </div>
+          <div class="panel-body">
+            <div class="stats-row">
+              <div class="stat-card">
+                <div class="stat-value" id="dashMatchedVal">0</div>
+                <div class="stat-label">Matched</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-value neutral" id="dashTotalGtVal">0</div>
+                <div class="stat-label">Ground Truth</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-value neutral" id="dashSubmittedVal">0</div>
+                <div class="stat-label">Submitted</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-value danger" id="dashFalsePos">0</div>
+                <div class="stat-label">False Pos.</div>
+              </div>
+            </div>
+            <div style="margin-top:8px;">
+              <div class="form-label" style="margin-bottom:4px;">Reward</div>
+              <div class="reward-bar-container">
+                <div class="reward-bar" id="dashRewardBar" style="width:0%"></div>
+                <span class="reward-bar-label" id="dashRewardLabel">0.000</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right column: episode log -->
+      <div>
+        <div class="panel" style="position:sticky; top:72px;">
+          <div class="panel-header">
+            <span>Episode Log</span>
+            <span class="badge" id="dashStepBadge">Step 0</span>
+          </div>
+          <div class="panel-body panel-inset" style="padding:0;">
+            <div class="log-container" id="dashLog">
+              <div class="empty-state" style="padding:24px;">
+                <div class="empty-icon">&#128203;</div>
+                Episode steps will appear here
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       TAB 2 — PLAYGROUND  (interactive code review game)
+       ═══════════════════════════════════════════════════════════════ -->
+  <section class="tab-content" id="tab-playground">
+    <!-- Controls row -->
+    <div style="display:flex; gap:12px; align-items:flex-end; margin-bottom:16px; flex-wrap:wrap;">
+      <div class="form-group" style="margin-bottom:0; min-width:200px; flex:1; max-width:320px;">
+        <label class="form-label" for="pgTaskSelect">Task</label>
+        <select class="form-select" id="pgTaskSelect"></select>
+      </div>
+      <button class="btn btn-primary" id="pgStartBtn">Start Review</button>
+      <button class="btn btn-danger" id="pgDoneBtn" disabled>Finalize</button>
+    </div>
+
+    <div class="main-grid">
+      <!-- Left column: interactive code viewer -->
+      <div>
+        <div class="panel">
+          <div class="panel-header">
+            <span>Source Code — Click a line to report an issue</span>
+            <span class="badge" id="pgTaskBadge">--</span>
+          </div>
+          <div class="panel-body panel-inset">
+            <div class="code-viewer" id="pgCodeViewer">
+              <div class="empty-state">
+                <div class="empty-icon">&#128269;</div>
+                Select a task and click "Start Review"
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Issue reporting form (shown when a line is clicked) -->
+        <div class="panel" style="margin-top:16px; display:none;" id="pgIssueForm">
+          <div class="panel-header">
+            <span>Report Issue</span>
+            <span class="badge" id="pgIssueLineBadge">Line --</span>
+          </div>
+          <div class="panel-body">
+            <div style="display:flex; gap:12px; flex-wrap:wrap;">
+              <div class="form-group" style="flex:1; min-width:120px;">
+                <label class="form-label" for="pgIssueType">Type</label>
+                <select class="form-select" id="pgIssueType">
+                  <option value="style">Style</option>
+                  <option value="bug">Bug</option>
+                  <option value="security">Security</option>
+                </select>
+              </div>
+              <div class="form-group" style="flex:1; min-width:120px;">
+                <label class="form-label" for="pgIssueSeverity">Severity</label>
+                <select class="form-select" id="pgIssueSeverity">
+                  <option value="low">Low</option>
+                  <option value="medium" selected>Medium</option>
+                  <option value="high">High</option>
+                  <option value="critical">Critical</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="pgIssueDesc">Description</label>
+              <textarea class="form-textarea" id="pgIssueDesc" rows="2"
+                        placeholder="Describe the issue..."></textarea>
+            </div>
+            <div style="display:flex; gap:8px;">
+              <button class="btn btn-primary btn-sm" id="pgSubmitIssue">Submit Finding</button>
+              <button class="btn btn-secondary btn-sm" id="pgCancelIssue">Cancel</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Hints / Analysis display -->
+        <div id="pgInfoArea" style="margin-top:12px;"></div>
+      </div>
+
+      <!-- Right column: sidebar -->
+      <div>
+        <!-- Stats -->
+        <div class="panel" style="margin-bottom:16px;">
+          <div class="panel-header">
+            <span>Session</span>
+            <span class="badge" id="pgStepBadge">Step 0 / 10</span>
+          </div>
+          <div class="panel-body">
+            <div class="stats-row">
+              <div class="stat-card">
+                <div class="stat-value" id="pgRewardVal">0.000</div>
+                <div class="stat-label">Reward</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-value neutral" id="pgFindingsVal">0</div>
+                <div class="stat-label">Findings</div>
+              </div>
+            </div>
+            <div style="margin-top:8px;">
+              <div class="reward-bar-container">
+                <div class="reward-bar" id="pgRewardBar" style="width:0%"></div>
+                <span class="reward-bar-label" id="pgRewardLabel">0.000</span>
+              </div>
+            </div>
+
+            <!-- Action buttons -->
+            <div style="margin-top:12px; display:flex; flex-direction:column; gap:8px;">
+              <button class="btn btn-secondary btn-block btn-sm" id="pgHintBtn" disabled>
+                Request Hint <span class="btn-cost">(-0.05)</span>
+              </button>
+              <button class="btn btn-secondary btn-block btn-sm" id="pgAnalysisBtn" disabled>
+                Request Analysis <span class="btn-cost">(-0.10, once)</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Findings list -->
+        <div class="panel" style="position:sticky; top:72px;">
+          <div class="panel-header">
+            <span>Findings</span>
+            <span class="badge" id="pgFindingsCountBadge">0</span>
+          </div>
+          <div class="panel-body panel-inset" style="padding:0; max-height:400px; overflow-y:auto;">
+            <div id="pgFindingsList">
+              <div class="empty-state" style="padding:24px;">
+                <div class="empty-icon">&#128270;</div>
+                Click a code line to add findings
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Score modal (shown at end) -->
+    <div class="modal-overlay" id="pgScoreModal">
+      <div class="modal">
+        <div class="score-card" id="pgScoreCard">
+          <div class="score-title">Final Score</div>
+          <div class="score-value" id="pgFinalScore">0.000</div>
+          <div class="score-details">
+            <div>Findings: <span class="score-detail-value" id="pgFinalFindings">0</span></div>
+            <div>Steps: <span class="score-detail-value" id="pgFinalSteps">0</span></div>
+          </div>
+        </div>
+        <div class="modal-actions" style="margin-top:16px;">
+          <button class="btn btn-primary" id="pgScoreClose">Close</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════ SCRIPTS ═══════════ -->
+  <script src="/ui/js/api.js"></script>
+  <script src="/ui/js/dashboard.js"></script>
+  <script src="/ui/js/playground.js"></script>
+  <script>
+    // ── Tab switching ──
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+      });
+    });
+
+    // ── Health check ──
+    (async function checkHealth() {
+      const dot = document.getElementById('statusDot');
+      const txt = document.getElementById('statusText');
+      try {
+        await API.health();
+        dot.classList.remove('offline');
+        txt.textContent = 'Connected';
+      } catch {
+        dot.classList.add('offline');
+        txt.textContent = 'Offline';
+      }
+      setTimeout(checkHealth, 15000);
+    })();
+
+    // ── Populate task selects ──
+    const TASKS = [
+      { id: 'easy_1',   label: 'Easy 1 — Unused imports & naming',     diff: 'easy' },
+      { id: 'easy_2',   label: 'Easy 2 — Class & method naming',       diff: 'easy' },
+      { id: 'easy_3',   label: 'Easy 3 — Multiple imports & constants', diff: 'easy' },
+      { id: 'easy_4',   label: 'Easy 4 — CSV processor naming',         diff: 'easy' },
+      { id: 'easy_5',   label: 'Easy 5 — Config manager style',         diff: 'easy' },
+      { id: 'medium_1', label: 'Medium 1 — Binary search & basics',     diff: 'medium' },
+      { id: 'medium_2', label: 'Medium 2 — Flatten, count, dedup',      diff: 'medium' },
+      { id: 'medium_3', label: 'Medium 3 — Merge, parse, fibonacci',    diff: 'medium' },
+      { id: 'medium_4', label: 'Medium 4 — Bank account & transfer',    diff: 'medium' },
+      { id: 'medium_5', label: 'Medium 5 — Cache, levenshtein, group',  diff: 'medium' },
+      { id: 'hard_1',   label: 'Hard 1 — SQL injection & command exec', diff: 'hard' },
+      { id: 'hard_2',   label: 'Hard 2 — YAML, MD5, temp files',        diff: 'hard' },
+      { id: 'hard_3',   label: 'Hard 3 — XXE, SSRF, eval',             diff: 'hard' },
+      { id: 'hard_4',   label: 'Hard 4 — JWT, SMTP, base64 eval',      diff: 'hard' },
+      { id: 'hard_5',   label: 'Hard 5 — HTTP handler full audit',      diff: 'hard' },
+    ];
+
+    function populateSelect(selectEl) {
+      selectEl.innerHTML = '';
+      let lastDiff = '';
+      TASKS.forEach(t => {
+        if (t.diff !== lastDiff) {
+          const grp = document.createElement('optgroup');
+          grp.label = t.diff.toUpperCase();
+          selectEl.appendChild(grp);
+          lastDiff = t.diff;
+        }
+        const opt = document.createElement('option');
+        opt.value = t.id;
+        opt.textContent = t.label;
+        selectEl.lastChild.appendChild(opt);
+      });
+    }
+
+    populateSelect(document.getElementById('dashTaskSelect'));
+    populateSelect(document.getElementById('pgTaskSelect'));
+  </script>
+</body>
+</html>

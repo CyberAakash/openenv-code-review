@@ -471,6 +471,7 @@ name = "code-review-env"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "aiofiles" },
     { name = "fastapi" },
     { name = "openenv-core", extra = ["core"] },
     { name = "pydantic" },
@@ -484,6 +485,7 @@ inference = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aiofiles", specifier = ">=23.0.0" },
     { name = "fastapi", specifier = ">=0.110.0" },
     { name = "openai", marker = "extra == 'inference'", specifier = ">=1.0.0" },
     { name = "openenv-core", extras = ["core"], specifier = ">=0.2.2" },
