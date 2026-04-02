@@ -246,36 +246,6 @@ Main()
                 "low",
                 "Method name 'LoadData' should use snake_case (PEP 8)",
             ),
-            _issue(
-                21,
-                "style",
-                "low",
-                "Method name 'getData' should use snake_case — use get_data (PEP 8)",
-            ),
-            _issue(
-                24,
-                "style",
-                "low",
-                "Method name 'processRows' should use snake_case (PEP 8)",
-            ),
-            _issue(
-                26, "style", "low", "Variable name 'Row' should be lowercase (PEP 8)"
-            ),
-            _issue(
-                31,
-                "style",
-                "low",
-                "Method name 'SummaryStats' should use snake_case (PEP 8)",
-            ),
-            _issue(
-                33,
-                "style",
-                "low",
-                "Variable name 'AVG_COLS' uses ALL_CAPS; should be lowercase for local variable",
-            ),
-            _issue(
-                36, "style", "low", "Function name 'Main' should use snake_case (PEP 8)"
-            ),
         ],
     },
     {
@@ -332,28 +302,11 @@ val = cm.GetValue("threshold")
             _issue(
                 2, "style", "low", "Unused import: 'sys' is imported but never used"
             ),
-            _issue(5, "style", "low", "Unused import: 're' is imported but never used"),
             _issue(
                 10,
                 "style",
                 "low",
                 "Function name 'ReadConfig' should use snake_case (PEP 8)",
-            ),
-            _issue(12, "style", "low", "Variable name 'F' should be lowercase (PEP 8)"),
-            _issue(
-                13, "style", "low", "Variable name 'Data' should be lowercase (PEP 8)"
-            ),
-            _issue(
-                17,
-                "style",
-                "low",
-                "Function name 'parse_Values' has inconsistent casing; should be all snake_case",
-            ),
-            _issue(
-                19, "style", "low", "Variable name 'Res' should be lowercase (PEP 8)"
-            ),
-            _issue(
-                20, "style", "low", "Variable name 'Item' should be lowercase (PEP 8)"
             ),
             _issue(
                 24,
@@ -366,18 +319,6 @@ val = cm.GetValue("threshold")
                 "style",
                 "medium",
                 "Inconsistent constant naming: 'min' should be uppercase MIN for a class constant",
-            ),
-            _issue(
-                32,
-                "style",
-                "low",
-                "Method name 'GetValue' should use snake_case (PEP 8)",
-            ),
-            _issue(
-                38,
-                "style",
-                "low",
-                "Method name 'SaveConfig' should use snake_case (PEP 8)",
             ),
         ],
     },
@@ -423,6 +364,15 @@ def find_max(lst):
 def is_palindrome(s):
     s = s.lower()
     return s == s[::-1]
+
+def safe_get(lst, index, default=None):
+    try:
+        return lst[index]
+    except (IndexError, TypeError):
+        return default
+
+def clamp_value(val, lo=0, hi=100):
+    return max(lo, min(hi, val))
 """,
         "ground_truth": [
             _issue(
@@ -838,6 +788,11 @@ def read_file(filename):
     path = "/var/data/" + filename
     with open(path, "r") as f:
         return f.read()
+
+def list_data_directory():
+    # Safe: subprocess with list args, no shell injection possible
+    result = subprocess.run(["ls", "-la", "/var/data"], capture_output=True, text=True, check=True)
+    return result.stdout.splitlines()
 """,
         "ground_truth": [
             _issue(
@@ -969,6 +924,7 @@ def sanitize_html(html_input):
         "code_snippet": """\
 import os
 import json
+import hashlib
 import logging
 import xml.etree.ElementTree as ET
 import random
@@ -996,6 +952,10 @@ def make_request(url):
     response = urllib.request.urlopen(url)
     return response.read()
 
+def compute_checksum(data):
+    # SHA-256 is appropriate for data integrity verification
+    return hashlib.sha256(data.encode()).hexdigest()
+
 def generate_password(length=8):
     chars = string.ascii_lowercase
     return "".join(random.choice(chars) for _ in range(length))
@@ -1006,43 +966,43 @@ def process_user_input(data_str):
 """,
         "ground_truth": [
             _issue(
-                11,
+                12,
                 "security",
                 "critical",
                 "Hardcoded secret: API secret key embedded in source code",
             ),
             _issue(
-                14,
+                15,
                 "security",
                 "critical",
                 "Plaintext password comparison: comparing raw password to hash is broken authentication; use proper hash verification",
             ),
             _issue(
-                20,
+                21,
                 "security",
                 "high",
                 "XML External Entity (XXE): 'ET.fromstring()' on untrusted XML can lead to XXE attacks; use defusedxml",
             ),
             _issue(
-                24,
+                25,
                 "security",
                 "critical",
                 "Sensitive data logging: credit card number logged in plaintext; PCI-DSS violation",
             ),
             _issue(
-                28,
+                29,
                 "security",
                 "high",
                 "SSRF vulnerability: 'urllib.request.urlopen(url)' with user-controlled URL allows Server-Side Request Forgery",
             ),
             _issue(
-                32,
+                36,
                 "security",
                 "medium",
                 "Weak password generation: only lowercase ASCII letters, no digits/symbols/uppercase; insufficient entropy",
             ),
             _issue(
-                35,
+                40,
                 "security",
                 "critical",
                 "Code injection: 'eval(data_str)' on untrusted input allows arbitrary code execution",

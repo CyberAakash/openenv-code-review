@@ -4,15 +4,17 @@ import sys
 import os
 from pathlib import Path
 
-# Ensure the project root is on the path so models.py can be imported
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 from fastapi import Request
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from openenv.core.env_server.http_server import create_app
 
-from models import CodeReviewAction, CodeReviewObservation
+try:
+    from models import CodeReviewAction, CodeReviewObservation
+except ImportError:
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from models import CodeReviewAction, CodeReviewObservation
+
 from server.code_review_environment import CodeReviewEnvironment
 
 app = create_app(

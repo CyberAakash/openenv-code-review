@@ -18,12 +18,12 @@ class CodeFinding(BaseModel):
     line_number: int = Field(
         ..., description="Line number where the issue occurs (1-indexed)"
     )
-    issue_type: str = Field(
+    issue_type: Literal["style", "bug", "security"] = Field(
         ...,
         description="Category of the issue: 'style', 'bug', or 'security'",
     )
     description: str = Field(..., description="Human-readable explanation of the issue")
-    severity: str = Field(
+    severity: Literal["low", "medium", "high", "critical"] = Field(
         default="medium",
         description="Severity level: 'low', 'medium', 'high', or 'critical'",
     )
@@ -41,7 +41,7 @@ class CodeReviewAction(Action):
     - "done" is signalled via the done=True flag (works with any action_type).
     """
 
-    action_type: str = Field(
+    action_type: Literal["review", "request_hint", "request_analysis"] = Field(
         default="review",
         description="Action type: 'review', 'request_hint', or 'request_analysis'",
     )
@@ -143,4 +143,4 @@ class EpisodeState(BaseModel):
     # Multi-step action tracking
     hints_used: int = 0  # number of hints requested (max 3)
     analysis_used: bool = False  # whether static analysis was already used
-    hint_categories_revealed: List[str] = Field(default_factory=list)
+    review_steps: int = 0  # number of review-type steps (for efficiency bonus)

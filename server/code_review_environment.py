@@ -24,15 +24,23 @@ from openenv.core.env_server.interfaces import Environment
 
 import sys, os
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from models import (
-    CodeFinding,
-    CodeReviewAction,
-    CodeReviewObservation,
-    EpisodeState,
-    GroundTruthIssue,
-)
+try:
+    from models import (
+        CodeFinding,
+        CodeReviewAction,
+        CodeReviewObservation,
+        EpisodeState,
+        GroundTruthIssue,
+    )
+except ImportError:
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from models import (
+        CodeFinding,
+        CodeReviewAction,
+        CodeReviewObservation,
+        EpisodeState,
+        GroundTruthIssue,
+    )
 from server.tasks import get_task, list_task_ids, TASKS_BY_DIFFICULTY
 
 # ---------------------------------------------------------------------------
@@ -40,6 +48,28 @@ from server.tasks import get_task, list_task_ids, TASKS_BY_DIFFICULTY
 # ---------------------------------------------------------------------------
 _STATE_STORE: Dict[str, EpisodeState] = {}
 _LATEST_EPISODE_ID: str = ""  # Track latest episode for stateless HTTP
+_MAX_STORED_EPISODES = 100  # Evict old episodes when exceeded
+
+
+def _cleanup_store() -> None:
+    """Evict old episodes when the store exceeds the limit.
+
+    Removes completed episodes first, then oldest by step number.
+    """
+    if len(_STATE_STORE) <= _MAX_STORED_EPISODES:
+        return
+    # Sort: done episodes first (evict those), then by lowest step number
+    to_evict = sorted(
+        _STATE_STORE.keys(),
+        key=lambda eid: (
+            0 if _STATE_STORE[eid].done else 1,
+            _STATE_STORE[eid].step_number,
+        ),
+    )
+    # Remove until we're under the limit
+    while len(_STATE_STORE) > _MAX_STORED_EPISODES and to_evict:
+        del _STATE_STORE[to_evict.pop(0)]
+
 
 # ---------------------------------------------------------------------------
 # Severity weights for reward calculation
@@ -243,15 +273,21 @@ def _generate_analysis(state: EpisodeState) -> str:
 
 
 def _step_efficiency_bonus(state: EpisodeState) -> float:
-    """Bonus for completing the review efficiently (fewer steps = better).
+    """Bonus for completing the review efficiently (fewer review steps = better).
 
-    Max bonus: +0.15 (finished in 1 step)
-    Min bonus: 0.0 (used all steps)
+    Only counts 'review' action steps — hint/analysis steps are free.
+    This avoids penalising agents for using the environment's multi-step
+    information-gathering mechanics.
+
+    Max bonus: +0.15 (finished in 1 review step)
+    Min bonus: 0.0 (used many review steps)
     """
-    if state.max_steps <= 1:
+    # Use review_steps (not total step_number) so hint/analysis are free
+    review_steps = max(state.review_steps, 1)
+    max_review_steps = state.max_steps  # theoretical max
+    if max_review_steps <= 1:
         return 0.15
-    # Linear decay
-    fraction_used = state.step_number / state.max_steps
+    fraction_used = review_steps / max_review_steps
     return max(0.0, 0.15 * (1.0 - fraction_used))
 
 
@@ -297,6 +333,8 @@ class CodeReviewEnvironment(
         """
         global _LATEST_EPISODE_ID
 
+        _cleanup_store()  # Evict old episodes if store is too large
+
         task_id: str = kwargs.get("task_id", "easy_1")
         task = get_task(task_id)
 
@@ -321,7 +359,7 @@ class CodeReviewEnvironment(
             last_feedback="",
             hints_used=0,
             analysis_used=False,
-            hint_categories_revealed=[],
+            review_steps=0,
         )
         self._set_state(state)
 
@@ -454,6 +492,7 @@ class CodeReviewEnvironment(
         """Handle a review action with findings submission."""
         step_reward = 0.0
         feedbacks: list[str] = []
+        state.review_steps += 1
 
         # ── Process submitted findings FIRST (even if done=True) ──────────
         if action.findings:
@@ -463,7 +502,8 @@ class CodeReviewEnvironment(
                     feedbacks.append(
                         f"Line {finding.line_number} ({finding.issue_type}): duplicate — ignored"
                     )
-                    state.submitted_findings.append(finding)
+                    # Don't append duplicates to submitted_findings — they shouldn't
+                    # count as submissions or inflate false-positive counts.
                     continue
 
                 is_match, gt_idx, fb, extra_bonus = _match_finding(
@@ -482,9 +522,10 @@ class CodeReviewEnvironment(
                         f"(+{reward_delta:.3f}, base={base_reward:.3f}, bonus={extra_bonus:+.3f})"
                     )
                 else:
-                    step_reward -= 0.1
+                    # Small per-step signal for false positives (main penalty at finalization)
+                    step_reward -= 0.03
                     feedbacks.append(
-                        f"Line {finding.line_number} ({finding.issue_type}): FALSE POSITIVE (-0.100)"
+                        f"Line {finding.line_number} ({finding.issue_type}): FALSE POSITIVE (-0.030)"
                     )
 
                 state.submitted_findings.append(finding)

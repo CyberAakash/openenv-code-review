@@ -398,6 +398,10 @@ def main():
     print(f"  Tasks:      {len(TASKS)} tasks")
     print("=" * 60)
 
+    if not HF_TOKEN:
+        print("\n  [WARN] HF_TOKEN not set — LLM calls will likely fail.")
+        print("         Set the HF_TOKEN environment variable to your API key.")
+
     # Health check
     try:
         health = requests.get(f"{ENV_URL}/health", timeout=10)
