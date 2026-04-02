@@ -27,6 +27,10 @@ class CodeFinding(BaseModel):
         default="medium",
         description="Severity level: 'low', 'medium', 'high', or 'critical'",
     )
+    fix_code: Optional[str] = Field(
+        default=None,
+        description="Optional: corrected code that fixes this specific issue (used with submit_fix action)",
+    )
 
 
 class CodeReviewAction(Action):
@@ -36,18 +40,22 @@ class CodeReviewAction(Action):
     - "review" (default): Submit findings for grading. Findings list may be non-empty.
     - "request_hint": Ask for a hint about unfound issue categories.
                       Costs -0.05 reward. No findings processed.
-    - "request_analysis": Run static analysis to reveal obvious issues.
-                          Costs -0.10 reward. Usable once per episode. No findings processed.
+    - "run_ast_analysis": Run real AST-based static analysis on the code.
+                          Costs -0.05 reward. Usable once per episode. Returns actual findings.
+    - "submit_fix": Submit code fixes for detected issues. Findings must include fix_code.
+                    Correct fixes earn +0.10 bonus; broken fixes incur -0.05 penalty.
     - "done" is signalled via the done=True flag (works with any action_type).
     """
 
-    action_type: Literal["review", "request_hint", "request_analysis"] = Field(
-        default="review",
-        description="Action type: 'review', 'request_hint', or 'request_analysis'",
+    action_type: Literal["review", "request_hint", "run_ast_analysis", "submit_fix"] = (
+        Field(
+            default="review",
+            description="Action type: 'review', 'request_hint', 'run_ast_analysis', or 'submit_fix'",
+        )
     )
     findings: List[CodeFinding] = Field(
         default_factory=list,
-        description="List of code issues found in this step (only used when action_type='review')",
+        description="List of code issues found in this step (used with 'review' and 'submit_fix' actions)",
     )
     done: bool = Field(
         default=False,
@@ -101,10 +109,23 @@ class CodeReviewObservation(Observation):
     )
     analysis_result: str = Field(
         default="",
-        description="Static analysis output revealing obvious issues (populated by request_analysis action)",
+        description="AST analysis output with real findings (populated by run_ast_analysis action)",
+    )
+    ast_summary: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Structural AST metadata: functions, imports, line count, etc. (populated on reset)",
+    )
+    fix_feedback: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Feedback on submitted code fixes (populated by submit_fix action)",
     )
     available_actions: List[str] = Field(
-        default_factory=lambda: ["review", "request_hint", "request_analysis"],
+        default_factory=lambda: [
+            "review",
+            "request_hint",
+            "run_ast_analysis",
+            "submit_fix",
+        ],
         description="Action types still available in this episode",
     )
 
@@ -142,5 +163,8 @@ class EpisodeState(BaseModel):
     last_feedback: str = ""
     # Multi-step action tracking
     hints_used: int = 0  # number of hints requested (max 3)
-    analysis_used: bool = False  # whether static analysis was already used
+    analysis_used: bool = False  # whether AST analysis was already used
     review_steps: int = 0  # number of review-type steps (for efficiency bonus)
+    # Fix tracking
+    fixes_submitted: int = 0  # total fix attempts
+    fixes_accepted: int = 0  # successful fixes

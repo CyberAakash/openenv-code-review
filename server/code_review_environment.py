@@ -6,12 +6,14 @@ Uses a module-level state store so that state persists across HTTP requests
 Multi-step mechanics:
 - "review": Submit findings for grading (default)
 - "request_hint": Get a hint about unfound issue categories (costs -0.05, max 3 per episode)
-- "request_analysis": Run simulated static analysis revealing obvious issues (costs -0.10, once per episode)
+- "run_ast_analysis": Run real AST-based static analysis (costs -0.05, once per episode)
+- "submit_fix": Submit code fixes for detected issues (bonus +0.10 per valid fix)
 
 Grading enhancements:
 - Description keyword matching: bonus for finding descriptions that mention key terms
 - Severity accuracy: bonus when agent's severity matches ground-truth severity
 - Step efficiency factor: bonus for finishing with fewer steps
+- Fix bonus: extra reward for submitting valid code fixes
 """
 
 from __future__ import annotations
@@ -42,6 +44,7 @@ except ImportError:
         GroundTruthIssue,
     )
 from server.tasks import get_task, list_task_ids, TASKS_BY_DIFFICULTY
+from server.ast_analyzer import analyze_code, get_ast_summary, verify_fix
 
 # ---------------------------------------------------------------------------
 # Module-level state store  (survives across Environment instances)
@@ -87,8 +90,13 @@ LINE_TOLERANCE = 2  # +-2 lines for matching
 
 # Costs for information-gathering actions
 HINT_COST = 0.05
-ANALYSIS_COST = 0.10
+AST_ANALYSIS_COST = 0.05  # Cheaper than old oracle since results are real but imperfect
 MAX_HINTS = 3
+
+# Fix submission rewards/penalties
+FIX_VALID_BONUS = 0.10  # Bonus for a correctly verified fix
+FIX_BROKEN_PENALTY = 0.05  # Penalty for a fix that doesn't parse
+FIX_REGRESSION_PENALTY = 0.08  # Penalty for a fix that introduces new issues
 
 
 # ---------------------------------------------------------------------------
@@ -242,34 +250,22 @@ def _generate_hint(state: EpisodeState) -> str:
     return hint
 
 
-def _generate_analysis(state: EpisodeState) -> str:
-    """Generate a static analysis output that reveals the most obvious issues.
+def _generate_ast_analysis(code_snippet: str) -> str:
+    """Run real AST analysis on the code snippet and format results as text.
 
-    Reveals up to 2 of the easiest-to-detect issues (lowest severity first).
-    Gives issue type and approximate line, but NOT the exact description.
+    Returns actual findings from AST walking — not ground-truth leakage.
     """
-    unfound = [
-        (idx, gt)
-        for idx, gt in enumerate(state.ground_truth)
-        if idx not in state.matched_indices
-    ]
-    if not unfound:
-        return "Static analysis: No remaining issues detected."
+    findings = analyze_code(code_snippet)
+    if not findings:
+        return "AST analysis: No issues detected by static analysis."
 
-    # Sort by severity (easiest first)
-    sev_rank = {"low": 0, "medium": 1, "high": 2, "critical": 3}
-    unfound.sort(key=lambda x: sev_rank.get(x[1].severity, 1))
-
-    # Reveal up to 2
-    revealed = unfound[:2]
-    lines = []
-    for _, gt in revealed:
+    lines = ["AST analysis results:"]
+    for f in findings:
         lines.append(
-            f"  - Line {gt.line_number}: potential {gt.issue_type} issue "
-            f"(severity: {gt.severity})"
+            f"  - [{f.check_id}] Line {f.line_number}: {f.description} "
+            f"(type: {f.issue_type}, severity: {f.severity}, confidence: {f.confidence:.0%})"
         )
-
-    return "Static analysis results:\n" + "\n".join(lines)
+    return "\n".join(lines)
 
 
 def _step_efficiency_bonus(state: EpisodeState) -> float:
@@ -319,7 +315,8 @@ class CodeReviewEnvironment(
         if state.hints_used < MAX_HINTS:
             actions.append("request_hint")
         if not state.analysis_used:
-            actions.append("request_analysis")
+            actions.append("run_ast_analysis")
+        actions.append("submit_fix")
         return actions
 
     # -- Environment interface ----------------------------------------------
@@ -360,8 +357,13 @@ class CodeReviewEnvironment(
             hints_used=0,
             analysis_used=False,
             review_steps=0,
+            fixes_submitted=0,
+            fixes_accepted=0,
         )
         self._set_state(state)
+
+        # Compute AST summary for the initial observation (Feature C)
+        ast_summary_data = get_ast_summary(state.code_snippet)
 
         return CodeReviewObservation(
             reward=0.0,
@@ -374,9 +376,15 @@ class CodeReviewEnvironment(
             step_number=0,
             max_steps=state.max_steps,
             findings_so_far=0,
-            feedback="Episode started. Review the code and submit findings. You can also use 'request_hint' or 'request_analysis' actions to gather information (at a reward cost).",
+            feedback=(
+                "Episode started. Review the code and submit findings. "
+                "You can use 'request_hint' for clues, 'run_ast_analysis' for "
+                "real static analysis, or 'submit_fix' to fix detected issues."
+            ),
             hint="",
             analysis_result="",
+            ast_summary=ast_summary_data,
+            fix_feedback=None,
             available_actions=self._available_actions(state),
         )
 
@@ -410,9 +418,13 @@ class CodeReviewEnvironment(
         if action_type == "request_hint":
             return self._handle_hint(state, action)
 
-        # ── Handle request_analysis ──────────────────────────────────────
-        if action_type == "request_analysis":
-            return self._handle_analysis(state, action)
+        # ── Handle run_ast_analysis ──────────────────────────────────────
+        if action_type == "run_ast_analysis":
+            return self._handle_ast_analysis(state, action)
+
+        # ── Handle submit_fix ────────────────────────────────────────────
+        if action_type == "submit_fix":
+            return self._handle_fix(state, action)
 
         # ── Handle review (default) ──────────────────────────────────────
         return self._handle_review(state, action)
@@ -456,21 +468,21 @@ class CodeReviewEnvironment(
             state, reward=cost, feedback=feedback, hint=hint_text
         )
 
-    def _handle_analysis(
+    def _handle_ast_analysis(
         self, state: EpisodeState, action: CodeReviewAction
     ) -> CodeReviewObservation:
-        """Handle a request_analysis action."""
+        """Handle a run_ast_analysis action — runs real AST checks."""
         if state.analysis_used:
-            feedback = "Static analysis already used this episode. Use 'review' to submit findings."
+            feedback = "AST analysis already used this episode. Use 'review' to submit findings."
             self._set_state(state)
             return self._make_observation(state, reward=0.0, feedback=feedback)
 
         state.analysis_used = True
-        analysis_text = _generate_analysis(state)
-        cost = -ANALYSIS_COST
+        analysis_text = _generate_ast_analysis(state.code_snippet)
+        cost = -AST_ANALYSIS_COST
         state.total_reward += cost
 
-        feedback = f"Static analysis complete (cost: {cost:+.3f})."
+        feedback = f"AST analysis complete (cost: {cost:+.3f}). Results show real findings from static analysis."
 
         # Check for done signal
         if action.done:
@@ -484,6 +496,116 @@ class CodeReviewEnvironment(
         self._set_state(state)
         return self._make_observation(
             state, reward=cost, feedback=feedback, analysis=analysis_text
+        )
+
+    def _handle_fix(
+        self, state: EpisodeState, action: CodeReviewAction
+    ) -> CodeReviewObservation:
+        """Handle a submit_fix action — verify code fixes for detected issues.
+
+        Each finding must include fix_code. The fix is verified by:
+        1. Syntax check (must parse)
+        2. Pattern removal (dangerous pattern should be gone)
+        3. Safe alternative present
+        4. No regression (no new dangerous patterns)
+
+        Rewards:
+          +0.10 per valid fix
+          -0.05 per broken fix (syntax error)
+          -0.08 per fix that introduces new issues
+        """
+        step_reward = 0.0
+        feedbacks: List[str] = []
+        fix_results: Dict[str, Any] = {"fixes": [], "total_bonus": 0.0}
+
+        if not action.findings:
+            feedbacks.append(
+                "No findings with fixes submitted. Include fix_code in your findings."
+            )
+        else:
+            for finding in action.findings:
+                state.fixes_submitted += 1
+
+                if not finding.fix_code:
+                    feedbacks.append(
+                        f"Line {finding.line_number}: no fix_code provided — skipped."
+                    )
+                    continue
+
+                # Try to match this finding to a ground truth issue
+                is_match, gt_idx, _, _ = _match_finding(
+                    finding,
+                    state.ground_truth,
+                    [],  # Don't filter by matched — allow fixing any
+                )
+
+                # Determine the check_id for this finding
+                # Use AST analysis to figure out what check applies at this line
+                ast_findings = analyze_code(state.code_snippet)
+                check_id = "UNKNOWN"
+                for af in ast_findings:
+                    if abs(af.line_number - finding.line_number) <= LINE_TOLERANCE:
+                        check_id = af.check_id
+                        break
+
+                # Verify the fix
+                result = verify_fix(
+                    state.code_snippet,
+                    finding.fix_code,
+                    check_id,
+                    finding.line_number,
+                )
+
+                fix_entry = {
+                    "line": finding.line_number,
+                    "check_id": check_id,
+                    "is_valid": result.is_valid,
+                    "score": result.score,
+                    "feedback": result.feedback,
+                }
+                fix_results["fixes"].append(fix_entry)
+
+                if result.is_valid:
+                    state.fixes_accepted += 1
+                    bonus = FIX_VALID_BONUS * result.score
+                    step_reward += bonus
+                    feedbacks.append(
+                        f"Line {finding.line_number} fix: VALID (+{bonus:.3f}) — {result.feedback}"
+                    )
+                elif result.issues_introduced:
+                    penalty = -FIX_REGRESSION_PENALTY
+                    step_reward += penalty
+                    feedbacks.append(
+                        f"Line {finding.line_number} fix: REGRESSION ({penalty:+.3f}) — {result.feedback}"
+                    )
+                else:
+                    penalty = -FIX_BROKEN_PENALTY
+                    step_reward += penalty
+                    feedbacks.append(
+                        f"Line {finding.line_number} fix: REJECTED ({penalty:+.3f}) — {result.feedback}"
+                    )
+
+        fix_results["total_bonus"] = step_reward
+        state.total_reward += step_reward
+
+        feedback_text = " | ".join(feedbacks) if feedbacks else "No fixes processed."
+
+        # Check for done signal
+        if action.done:
+            return self._finalize_episode(
+                state, step_reward, feedback_text, fix_feedback=fix_results
+            )
+
+        # Auto-terminate if max steps reached
+        if state.step_number >= state.max_steps:
+            return self._auto_terminate(
+                state, step_reward, feedback_text, fix_feedback=fix_results
+            )
+
+        state.last_feedback = feedback_text
+        self._set_state(state)
+        return self._make_observation(
+            state, reward=step_reward, feedback=feedback_text, fix_feedback=fix_results
         )
 
     def _handle_review(
@@ -561,6 +683,7 @@ class CodeReviewEnvironment(
         feedback_prefix: str,
         hint: str = "",
         analysis: str = "",
+        fix_feedback: Optional[Dict[str, Any]] = None,
     ) -> CodeReviewObservation:
         """Compute final bonuses and terminate the episode."""
         state.done = True
@@ -599,6 +722,7 @@ class CodeReviewEnvironment(
             f"Review complete. Matched {matched_count}/{total_issues} issues. "
             f"Precision={precision:.2f}, Recall={recall:.2f}, F1={f1:.2f}. "
             f"Efficiency bonus={efficiency_bonus:+.3f}. "
+            f"Fixes: {state.fixes_accepted}/{state.fixes_submitted} accepted. "
             f"Total reward={state.total_reward:.3f}"
         )
 
@@ -613,6 +737,7 @@ class CodeReviewEnvironment(
             feedback=final_feedback,
             hint=hint,
             analysis=analysis,
+            fix_feedback=fix_feedback,
         )
 
     def _auto_terminate(
@@ -622,6 +747,7 @@ class CodeReviewEnvironment(
         feedback_prefix: str,
         hint: str = "",
         analysis: str = "",
+        fix_feedback: Optional[Dict[str, Any]] = None,
     ) -> CodeReviewObservation:
         """Auto-terminate when max steps is reached."""
         extra_feedback = "Max steps reached — episode auto-terminated."
@@ -631,7 +757,12 @@ class CodeReviewEnvironment(
             else extra_feedback
         )
         return self._finalize_episode(
-            state, step_reward, combined_prefix, hint=hint, analysis=analysis
+            state,
+            step_reward,
+            combined_prefix,
+            hint=hint,
+            analysis=analysis,
+            fix_feedback=fix_feedback,
         )
 
     # -- internal -----------------------------------------------------------
@@ -643,6 +774,7 @@ class CodeReviewEnvironment(
         feedback: str,
         hint: str = "",
         analysis: str = "",
+        fix_feedback: Optional[Dict[str, Any]] = None,
     ) -> CodeReviewObservation:
         return CodeReviewObservation(
             reward=reward,
@@ -658,5 +790,7 @@ class CodeReviewEnvironment(
             feedback=feedback,
             hint=hint,
             analysis_result=analysis,
+            ast_summary=None,  # Only populated on reset
+            fix_feedback=fix_feedback,
             available_actions=self._available_actions(state),
         )
