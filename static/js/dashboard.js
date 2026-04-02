@@ -730,10 +730,10 @@ Return ONLY a valid JSON array, no other text.`;
       stepNum++;
       stepBadge().textContent = `Step ${stepNum}`;
       try {
-        const analysisResp = await API.requestAnalysis(episodeId);
+        const analysisResp = await API.runAstAnalysis(episodeId);
         totalReward = analysisResp.reward || totalReward;
         const analysisText = analysisResp.analysis_result || 'No analysis available';
-        addLog(stepNum, '@', `Analysis: ${analysisText.substring(0, 120)}...`, -0.10);
+        addLog(stepNum, '@', `AST Analysis: ${analysisText.substring(0, 120)}...`, -0.05);
       } catch (e) {
         addLog(stepNum, '!', `Analysis request failed: ${e.message}`, 0);
       }
@@ -757,6 +757,72 @@ Return ONLY a valid JSON array, no other text.`;
         }
       }
       phaseIdx++;
+    }
+
+    // ── Optional: Submit fixes for hard tasks ──────────────────────────
+    if (diff === 'hard' && allSubmitted.length > 0 && stepNum < 9) {
+      // Pick security findings that have heuristic fixes
+      const FIX_MAP = {
+        'os.system(': {
+          pattern: /os\.system\(/,
+          fix: (line) => line.replace(/os\.system\((.+)\)/, 'subprocess.run($1, shell=False, check=True)'),
+          desc: 'Replace os.system with subprocess.run',
+        },
+        'pickle.loads(': {
+          pattern: /pickle\.loads\(/,
+          fix: (line) => line.replace(/pickle\.loads\(/, 'json.loads('),
+          desc: 'Replace pickle.loads with json.loads',
+        },
+        'eval(': {
+          pattern: /eval\(/,
+          fix: (line) => line.replace(/eval\((.+)\)/, 'ast.literal_eval($1)'),
+          desc: 'Replace eval with ast.literal_eval',
+        },
+      };
+
+      const fixFindings = [];
+      const codeLineTexts = obs.code_snippet.split('\n');
+
+      for (const finding of allSubmitted) {
+        if (finding.issue_type !== 'security') continue;
+        const lineText = codeLineTexts[finding.line_number - 1] || '';
+        for (const [key, fixer] of Object.entries(FIX_MAP)) {
+          if (fixer.pattern.test(lineText)) {
+            const fixedLine = fixer.fix(lineText);
+            fixFindings.push({
+              line_number: finding.line_number,
+              issue_type: finding.issue_type,
+              severity: finding.severity,
+              description: fixer.desc,
+              fix_code: fixedLine,
+            });
+            break;
+          }
+        }
+        if (fixFindings.length >= 2) break; // Max 2 fixes per sim
+      }
+
+      if (fixFindings.length > 0) {
+        await randomDelay();
+        stepNum++;
+        stepBadge().textContent = `Step ${stepNum}`;
+        try {
+          const fixResp = await API.submitFixes(episodeId, fixFindings);
+          totalReward = fixResp.reward || totalReward;
+          const fixFb = fixResp.fix_feedback;
+          let fixLog = `Submitted ${fixFindings.length} fix(es)`;
+          if (fixFb && fixFb.fixes) {
+            const valid = fixFb.fixes.filter(f => f.is_valid).length;
+            fixLog += ` — ${valid}/${fixFb.fixes.length} valid`;
+          }
+          if (fixFb && fixFb.total_bonus) {
+            fixLog += ` (${fixFb.total_bonus >= 0 ? '+' : ''}${fixFb.total_bonus.toFixed(3)})`;
+          }
+          addLog(stepNum, '+', fixLog, fixFb?.total_bonus || 0);
+        } catch (e) {
+          addLog(stepNum, '!', `Fix submission failed: ${e.message}`, 0);
+        }
+      }
     }
 
     // Final: Done

@@ -216,6 +216,12 @@
     <div class="main-grid">
       <!-- Left column: interactive code viewer -->
       <div>
+        <!-- AST Summary panel (populated on reset) -->
+        <div id="pgAstSummary" class="ast-summary" style="display:none;">
+          <div class="ast-summary-title">AST Summary</div>
+          <div class="ast-summary-grid" id="pgAstSummaryGrid"></div>
+        </div>
+
         <div class="panel">
           <div class="panel-header">
             <span>Source Code — Click a line to report an issue</span>
@@ -262,8 +268,17 @@
               <textarea class="form-textarea" id="pgIssueDesc" rows="2"
                         placeholder="Describe the issue..."></textarea>
             </div>
-            <div style="display:flex; gap:8px;">
+            <div class="fix-code-section">
+              <button class="fix-code-toggle" id="pgFixToggle">+ Attach fix code (optional)</button>
+              <div class="fix-code-area" id="pgFixArea">
+                <label class="form-label" for="pgFixCode">Fix Code</label>
+                <textarea class="form-textarea" id="pgFixCode" rows="4"
+                          placeholder="Paste corrected code that fixes this issue..."></textarea>
+              </div>
+            </div>
+            <div style="display:flex; gap:8px; margin-top:8px;">
               <button class="btn btn-primary btn-sm" id="pgSubmitIssue">Submit Finding</button>
+              <button class="btn btn-secondary btn-sm" id="pgSubmitFix" style="display:none;">Submit Fix</button>
               <button class="btn btn-secondary btn-sm" id="pgCancelIssue">Cancel</button>
             </div>
           </div>
@@ -305,7 +320,7 @@
                 Request Hint <span class="btn-cost">(-0.05)</span>
               </button>
               <button class="btn btn-secondary btn-block btn-sm" id="pgAnalysisBtn" disabled>
-                Request Analysis <span class="btn-cost">(-0.10, once)</span>
+                Run AST Analysis <span class="btn-cost">(-0.05, once)</span>
               </button>
             </div>
           </div>

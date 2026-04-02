@@ -32,6 +32,12 @@ const Playground = (() => {
   const finalFindings = () => document.getElementById('pgFinalFindings');
   const finalSteps    = () => document.getElementById('pgFinalSteps');
   const scoreClose    = () => document.getElementById('pgScoreClose');
+  const astSummaryEl  = () => document.getElementById('pgAstSummary');
+  const astSummaryGrid= () => document.getElementById('pgAstSummaryGrid');
+  const fixToggle     = () => document.getElementById('pgFixToggle');
+  const fixArea       = () => document.getElementById('pgFixArea');
+  const fixCode       = () => document.getElementById('pgFixCode');
+  const submitFixBtn  = () => document.getElementById('pgSubmitFix');
 
   // ── State ──
   let episodeId = null;
@@ -164,14 +170,160 @@ const Playground = (() => {
   }
 
   // ── Show info box ──
-  function showInfo(type, text) {
+  function showInfo(type, text, isHtml = false) {
     const area = infoArea();
     const box = document.createElement('div');
     box.className = `info-box ${type}`;
-    box.textContent = text;
+    if (isHtml) {
+      box.innerHTML = text;
+    } else {
+      box.textContent = text;
+    }
     area.appendChild(box);
     // Auto-remove after 30s
     setTimeout(() => box.remove(), 30000);
+  }
+
+  // ── Render AST summary panel ──
+  function renderAstSummary(summary) {
+    const panel = astSummaryEl();
+    const grid = astSummaryGrid();
+    if (!summary || !panel || !grid) return;
+
+    grid.innerHTML = '';
+
+    const DANGEROUS_MODULES = ['os', 'subprocess', 'pickle', 'eval', 'exec', 'yaml', 'xml'];
+
+    // Functions
+    const funcs = summary.functions || [];
+    if (funcs.length > 0) {
+      const item = _astItem('Functions', `${funcs.length} defined`);
+      const tags = document.createElement('div');
+      tags.className = 'ast-tags';
+      funcs.forEach(f => {
+        const tag = document.createElement('span');
+        tag.className = 'ast-tag';
+        tag.textContent = f;
+        tags.appendChild(tag);
+      });
+      item.appendChild(tags);
+      grid.appendChild(item);
+    }
+
+    // Imports
+    const imports = summary.imports || [];
+    if (imports.length > 0) {
+      const item = _astItem('Imports', `${imports.length} modules`);
+      const tags = document.createElement('div');
+      tags.className = 'ast-tags';
+      imports.forEach(imp => {
+        const tag = document.createElement('span');
+        tag.className = 'ast-tag' + (DANGEROUS_MODULES.includes(imp) ? ' dangerous' : '');
+        tag.textContent = imp;
+        tags.appendChild(tag);
+      });
+      item.appendChild(tags);
+      grid.appendChild(item);
+    }
+
+    // Classes
+    const classes = summary.classes || [];
+    if (classes.length > 0) {
+      grid.appendChild(_astItem('Classes', classes.join(', ')));
+    }
+
+    // Stats
+    grid.appendChild(_astItem('Total Lines', summary.total_lines || '?'));
+    grid.appendChild(_astItem('Function Calls', summary.call_count || '?'));
+
+    const dangerCount = summary.dangerous_import_count || 0;
+    const dangerItem = _astItem('Dangerous Imports', dangerCount);
+    if (dangerCount > 0) {
+      dangerItem.querySelector('.ast-summary-item-value').classList.add('danger');
+    }
+    grid.appendChild(dangerItem);
+
+    panel.style.display = 'block';
+  }
+
+  function _astItem(label, value) {
+    const item = document.createElement('div');
+    item.className = 'ast-summary-item';
+    item.innerHTML =
+      `<div class="ast-summary-item-label">${label}</div>` +
+      `<div class="ast-summary-item-value">${value}</div>`;
+    return item;
+  }
+
+  // ── Render fix feedback from submit_fix response ──
+  function renderFixFeedback(fixFeedback) {
+    if (!fixFeedback || !fixFeedback.fixes) return;
+
+    fixFeedback.fixes.forEach(fix => {
+      let cssClass, statusLabel;
+      if (fix.is_valid) {
+        cssClass = 'fix-valid';
+        statusLabel = 'VALID';
+      } else if (fix.feedback && fix.feedback.toLowerCase().includes('regression')) {
+        cssClass = 'fix-regression';
+        statusLabel = 'REGRESSION';
+      } else {
+        cssClass = 'fix-rejected';
+        statusLabel = 'REJECTED';
+      }
+
+      const html =
+        `<div class="fix-result-header">${statusLabel} &mdash; Line ${fix.line} [${fix.check_id}]</div>` +
+        `<div class="fix-result-detail">${fix.feedback || 'No details'}</div>` +
+        (fix.score !== undefined ? `<div class="fix-result-detail">Score: ${fix.score.toFixed(2)}</div>` : '');
+
+      showInfo(cssClass, html, true);
+    });
+
+    if (fixFeedback.total_bonus !== undefined) {
+      const bonusText = fixFeedback.total_bonus >= 0
+        ? `+${fixFeedback.total_bonus.toFixed(3)}`
+        : fixFeedback.total_bonus.toFixed(3);
+      showInfo(
+        fixFeedback.total_bonus >= 0 ? 'hint' : 'error',
+        `Fix total bonus: ${bonusText}`
+      );
+    }
+  }
+
+  // ── Render AST analysis results ──
+  function renderAnalysisResults(analysisText) {
+    if (!analysisText) return;
+
+    // Parse structured AST analysis output
+    // Format: "FINDINGS:\n  Line X: [CHECK_ID] message (confidence: N%)\n..."
+    const lines = analysisText.split('\n');
+    let html = '';
+    let findingCount = 0;
+
+    for (const line of lines) {
+      const match = line.match(/Line\s+(\d+):\s*\[([^\]]+)\]\s*(.*?)(?:\s*\(confidence:\s*(\d+)%\))?$/);
+      if (match) {
+        findingCount++;
+        const [, lineNum, checkId, msg, confidence] = match;
+        html +=
+          `<div class="ast-finding">` +
+          `<span class="ast-finding-line">L${lineNum}</span>` +
+          `<span class="ast-finding-check">${checkId}</span>` +
+          `<span class="ast-finding-msg">${msg.trim()}</span>` +
+          (confidence ? `<span class="ast-finding-confidence">${confidence}%</span>` : '') +
+          `</div>`;
+      }
+    }
+
+    if (findingCount > 0) {
+      showInfo('analysis',
+        `<div style="margin-bottom:6px; font-weight:700;">AST Analysis: ${findingCount} finding(s)</div>` + html,
+        true
+      );
+    } else {
+      showInfo('analysis', `AST Analysis: ${analysisText}`);
+    }
   }
 
   // ── Start episode ──
@@ -197,6 +349,13 @@ const Playground = (() => {
       renderFindings();
       updateStats();
       taskBadge().textContent = taskId;
+
+      // Display AST summary if available
+      if (obs.ast_summary) {
+        renderAstSummary(obs.ast_summary);
+      } else {
+        astSummaryEl().style.display = 'none';
+      }
 
       doneBtn().disabled = false;
       hintBtn().disabled = false;
@@ -296,14 +455,14 @@ const Playground = (() => {
 
     analysisBtn().disabled = true;
     try {
-      const resp = await API.requestAnalysis(episodeId);
+      const resp = await API.runAstAnalysis(episodeId);
       stepNumber = resp.step_number || stepNumber + 1;
       totalReward = resp.reward || totalReward;
       analysisUsed = true;
       updateStats();
 
       if (resp.analysis_result) {
-        showInfo('analysis', `Analysis: ${resp.analysis_result}`);
+        renderAnalysisResults(resp.analysis_result);
       }
       if (resp.done) endEpisode(resp);
     } catch (e) {
@@ -328,6 +487,57 @@ const Playground = (() => {
       showInfo('error', `Finalize failed: ${e.message}`);
       doneBtn().disabled = false;
     }
+  }
+
+  // ── Submit a code fix via API ──
+  async function submitFix() {
+    if (!active || selectedLine === null) return;
+
+    const code = fixCode().value.trim();
+    if (!code) {
+      showInfo('error', 'Fix code is empty. Write corrected code in the textarea.');
+      return;
+    }
+
+    const finding = {
+      line_number: selectedLine,
+      issue_type: issueType().value,
+      severity: issueSeverity().value,
+      description: issueDesc().value || `Fix for line ${selectedLine}`,
+      fix_code: code,
+    };
+
+    issueForm().style.display = 'none';
+
+    submitFixBtn().disabled = true;
+    try {
+      const resp = await API.submitFixes(episodeId, [finding]);
+      stepNumber = resp.step_number || stepNumber + 1;
+      totalReward = resp.reward || totalReward;
+      updateStats();
+
+      // Render fix feedback
+      if (resp.fix_feedback) {
+        renderFixFeedback(resp.fix_feedback);
+      }
+
+      // Show general feedback
+      if (resp.feedback) {
+        showInfo('hint', `Feedback: ${resp.feedback}`);
+      }
+
+      if (resp.done) endEpisode(resp);
+    } catch (e) {
+      showInfo('error', `Fix submission failed: ${e.message}`);
+    }
+
+    submitFixBtn().disabled = false;
+    selectedLine = null;
+    // Reset fix area
+    fixCode().value = '';
+    fixArea().classList.remove('visible');
+    fixToggle().textContent = '+ Attach fix code (optional)';
+    submitFixBtn().style.display = 'none';
   }
 
   // ── End episode — show score modal ──
@@ -360,6 +570,11 @@ const Playground = (() => {
     cancelIssue().addEventListener('click', () => {
       issueForm().style.display = 'none';
       selectedLine = null;
+      // Reset fix area
+      fixCode().value = '';
+      fixArea().classList.remove('visible');
+      fixToggle().textContent = '+ Attach fix code (optional)';
+      submitFixBtn().style.display = 'none';
       // Remove highlight
       codeViewer().querySelectorAll('.code-line.highlighted').forEach(el => {
         if (!el.classList.contains('flagged-correct') && !el.classList.contains('flagged-wrong')) {
@@ -372,6 +587,20 @@ const Playground = (() => {
     scoreClose().addEventListener('click', () => {
       scoreModal().classList.remove('active');
     });
+
+    // Fix code toggle
+    fixToggle().addEventListener('click', () => {
+      const area = fixArea();
+      const isVisible = area.classList.contains('visible');
+      area.classList.toggle('visible', !isVisible);
+      fixToggle().textContent = isVisible
+        ? '+ Attach fix code (optional)'
+        : '- Hide fix code';
+      submitFixBtn().style.display = isVisible ? 'none' : 'inline-flex';
+    });
+
+    // Submit fix button
+    submitFixBtn().addEventListener('click', submitFix);
 
     // Submit on Enter in description
     issueDesc().addEventListener('keydown', (e) => {

@@ -1260,3 +1260,201 @@ input[type="range"]::-moz-range-thumb {
   color: var(--info);
   border: 1px solid rgba(68, 170, 255, 0.3);
 }
+
+/* ── AST Summary Panel ─────────────────────────────────────────── */
+.ast-summary {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-raised);
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  animation: fadeIn 0.3s ease;
+}
+
+.ast-summary-title {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 8px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ast-summary-title::before {
+  content: '>';
+  color: var(--accent-dim);
+}
+
+.ast-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px;
+}
+
+.ast-summary-item {
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  box-shadow: var(--shadow-inset);
+}
+
+.ast-summary-item-label {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.ast-summary-item-value {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  color: var(--text-primary);
+  font-weight: 600;
+  margin-top: 2px;
+  word-break: break-word;
+}
+
+.ast-summary-item-value.danger {
+  color: var(--danger);
+}
+
+.ast-summary-item-value.accent {
+  color: var(--accent);
+}
+
+.ast-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.ast-tag {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: rgba(137, 233, 0, 0.1);
+  color: var(--accent);
+  border: 1px solid rgba(137, 233, 0, 0.2);
+}
+
+.ast-tag.dangerous {
+  background: rgba(255, 68, 68, 0.1);
+  color: var(--danger);
+  border: 1px solid rgba(255, 68, 68, 0.2);
+}
+
+/* ── Fix Feedback Info Boxes ───────────────────────────────────── */
+.info-box.fix-valid {
+  background: rgba(137, 233, 0, 0.08);
+  border: 1px solid rgba(137, 233, 0, 0.25);
+  color: var(--accent);
+}
+
+.info-box.fix-rejected {
+  background: rgba(255, 170, 0, 0.08);
+  border: 1px solid rgba(255, 170, 0, 0.25);
+  color: var(--warning);
+}
+
+.info-box.fix-regression {
+  background: rgba(255, 68, 68, 0.08);
+  border: 1px solid rgba(255, 68, 68, 0.25);
+  color: var(--danger);
+}
+
+.fix-result-header {
+  font-weight: 700;
+  font-size: 0.82rem;
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.fix-result-detail {
+  font-size: 0.75rem;
+  opacity: 0.85;
+}
+
+/* ── AST Analysis Findings List ────────────────────────────────── */
+.ast-finding {
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(58, 58, 58, 0.5);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.ast-finding:last-child {
+  border-bottom: none;
+}
+
+.ast-finding-line {
+  color: var(--accent);
+  min-width: 40px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.ast-finding-check {
+  font-size: 0.65rem;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(68, 170, 255, 0.15);
+  color: var(--info);
+  border: 1px solid rgba(68, 170, 255, 0.3);
+  flex-shrink: 0;
+}
+
+.ast-finding-msg {
+  flex: 1;
+  color: var(--text-secondary);
+}
+
+.ast-finding-confidence {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+/* ── Fix Code Textarea ─────────────────────────────────────────── */
+.fix-code-section {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+
+.fix-code-toggle {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px 0;
+  transition: color 0.15s;
+}
+
+.fix-code-toggle:hover {
+  color: var(--accent);
+}
+
+.fix-code-area {
+  display: none;
+  margin-top: 6px;
+}
+
+.fix-code-area.visible {
+  display: block;
+}

@@ -81,11 +81,26 @@ const API = (() => {
       });
     },
 
-    /** Convenience: request static analysis */
-    async requestAnalysis(episodeId) {
+    /** Convenience: run real AST-based static analysis */
+    async runAstAnalysis(episodeId) {
       return this.step({
-        action_type: 'request_analysis',
+        action_type: 'run_ast_analysis',
         findings: [],
+        done: false,
+        metadata: { episode_id: episodeId },
+      });
+    },
+
+    /** Backward-compat alias */
+    async requestAnalysis(episodeId) {
+      return this.runAstAnalysis(episodeId);
+    },
+
+    /** Convenience: submit code fixes for detected issues */
+    async submitFixes(episodeId, findings) {
+      return this.step({
+        action_type: 'submit_fix',
+        findings,
         done: false,
         metadata: { episode_id: episodeId },
       });
