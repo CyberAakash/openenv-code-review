@@ -1,27 +1,33 @@
 #!/usr/bin/env python3
-"""Baseline inference script for the Code Review environment.
+"""Learning inference script for the Code Review environment.
 
-Uses an OpenAI-compatible LLM to review code snippets and submit findings.
-Demonstrates multi-step interaction with AST analysis, hints, review, and fix actions.
+Uses cross-episode memory, within-episode adaptive refinement, and
+bandit-based strategy selection to improve over repeated runs.
 
-Strategy per episode:
-1. Reset — observe ast_summary for structural clues
-2. run_ast_analysis — get real static analysis findings (cost: -0.05)
-3. Initial review — LLM reviews code with AST context, submits findings
-4. (Medium/Hard) request_hint — learn what's still missing
-5. Refinement review — submit additional findings using hints
-6. submit_fix — attempt to fix high-confidence security issues for bonus reward
-7. Done
+Learning mechanisms:
+  A) Cross-episode memory: remembers what worked/failed per task, injects
+     into LLM prompts so it avoids past mistakes and focuses on missed issues.
+  B) Within-episode adaptive: parses step feedback mid-episode, drops false
+     positives, and refines the next submission based on what worked.
+  E) Bandit strategy selection: epsilon-greedy UCB1 over 4 strategy variants,
+     learns which approach works best for each difficulty level.
+
+Strategy variants:
+  - "review_only":   Review → Done  (fast, max efficiency bonus)
+  - "review_hint":   Review → Hint → Refine → Done
+  - "ast_first":     AST → Review → Hint → Refine → Done
+  - "full_pipeline": AST → Review → Hint → Refine → Fix → Done
 
 Environment variables (required by hackathon spec):
     API_BASE_URL  — The API endpoint for the LLM (default: https://api.openai.com/v1)
-    MODEL_NAME    — The model identifier to use for inference (default: gpt-4o-mini)
-    HF_TOKEN      — Your Hugging Face / API key for the LLM provider
+    MODEL_NAME    — The model identifier (default: gpt-4o-mini)
+    HF_TOKEN      — Your API key for the LLM provider
 
 Optional:
-    ENV_URL       — Base URL of the Code Review environment server
-                    (default: https://CyberAakash-code-review.hf.space)
-    TASKS         — Comma-separated list of task IDs to run
+    ENV_URL       — Base URL of the environment server
+    TASKS         — Comma-separated task IDs to run
+    MEMORY_FILE   — Path to memory JSON file (default: outputs/memory.json)
+    NUM_ROUNDS    — Number of rounds per task for learning (default: 1)
 """
 
 from __future__ import annotations
@@ -30,10 +36,17 @@ import json
 import os
 import sys
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import requests
 from openai import OpenAI
+
+from memory import (
+    MemoryManager,
+    ParsedFeedback,
+    parse_step_feedback,
+    parse_fix_feedback,
+)
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -44,10 +57,10 @@ API_BASE_URL = os.environ.get("API_BASE_URL", "https://api.openai.com/v1")
 MODEL_NAME = os.environ.get("MODEL_NAME", "gpt-4o-mini")
 HF_TOKEN = os.environ.get("HF_TOKEN", "")
 
-# Environment server URL (our deployed HF Space)
+# Environment server URL
 ENV_URL = os.environ.get("ENV_URL", "https://CyberAakash-code-review.hf.space")
 
-# Tasks to run (all 15 by default)
+# Tasks to run
 DEFAULT_TASKS = ",".join(
     [
         "easy_1",
@@ -68,6 +81,9 @@ DEFAULT_TASKS = ",".join(
     ]
 )
 TASKS = os.environ.get("TASKS", DEFAULT_TASKS).split(",")
+
+# Learning config
+NUM_ROUNDS = int(os.environ.get("NUM_ROUNDS", "1"))
 
 
 # ---------------------------------------------------------------------------
@@ -122,9 +138,12 @@ Return your findings as a JSON array. Example:
   {"line_number": 12, "issue_type": "bug", "severity": "high", "description": "Off-by-one error in loop bound"}
 ]
 
-Be thorough. Do not miss any issues. Do not report issues that don't exist.
-Red herrings may be present — safe code patterns that look suspicious but are actually correct.
-Return ONLY the JSON array, no other text.
+IMPORTANT RULES:
+- Be thorough but precise. Missing an issue is bad, but false positives are also penalized.
+- Red herrings may be present — safe code patterns that look suspicious but are actually correct.
+- Look carefully at whether imports are actually used before flagging them.
+- subprocess.run() with a list (no shell=True) is SAFE — do not flag it.
+- Return ONLY the JSON array, no other text.
 """
 
 REFINEMENT_PROMPT = """\
@@ -134,17 +153,20 @@ The environment has provided feedback and hints about remaining issues.
 Your previous findings received this feedback:
 {feedback}
 
+{step_analysis}
 {hint_section}
 {analysis_section}
+{memory_section}
 
 Here is the original code again:
 ```python
 {code_snippet}
 ```
 
-Based on the feedback and hints, find any ADDITIONAL issues you may have missed.
-Return ONLY a JSON array of new findings (do not repeat previous ones).
-If you believe you have found all issues, return an empty array: []
+Based on the feedback, hints, and learning from previous attempts, find any ADDITIONAL
+issues you may have missed. Do NOT repeat findings for lines that were already correct.
+Do NOT repeat false positive patterns.
+Return ONLY a JSON array of new findings. If you found everything, return: []
 """
 
 FIX_PROMPT = """\
@@ -159,15 +181,22 @@ Original code:
 Issues to fix (provide fix_code for each):
 {issues_json}
 
+{fix_memory}
+
 For each issue, return a JSON object with:
 - line_number: the line of the issue
 - issue_type: the type ("style", "bug", or "security")
 - severity: the severity level
 - description: brief description
-- fix_code: the corrected code that fixes JUST this issue (a few lines around the fix)
+- fix_code: the corrected code that fixes JUST this issue
 
-Return ONLY a JSON array. Each fix_code should be valid Python that removes the
-dangerous pattern and uses the safe alternative. Keep fixes minimal and focused.
+CRITICAL RULES for fix_code:
+- Must be valid Python with NO indentation errors (start at column 0)
+- Must REMOVE the dangerous pattern entirely
+- Must use the safe alternative (e.g., subprocess.run with list args instead of os.system)
+- Keep fixes minimal — only the fixed line(s), not the whole function
+
+Return ONLY a JSON array.
 
 Example:
 [
@@ -176,7 +205,7 @@ Example:
     "issue_type": "security",
     "severity": "critical",
     "description": "Command injection via os.system",
-    "fix_code": "def run_command(user_input):\\n    result = subprocess.run(['echo', user_input], capture_output=True)\\n    return result.returncode"
+    "fix_code": "result = subprocess.run(['echo', user_input], capture_output=True, text=True, check=True)\\nreturn result.returncode"
   }}
 ]
 """
@@ -224,6 +253,15 @@ def _parse_findings(content: str) -> List[Dict[str, Any]]:
             findings = [findings]
         return findings
     except json.JSONDecodeError:
+        # Try to extract JSON array from mixed content
+        import re
+
+        match = re.search(r"\[[\s\S]*\]", content)
+        if match:
+            try:
+                return json.loads(match.group(0))
+            except json.JSONDecodeError:
+                pass
         return []
 
 
@@ -231,14 +269,18 @@ def get_findings_from_llm(
     client: OpenAI,
     code_snippet: str,
     task_id: str,
-    ast_summary: Dict[str, Any] = None,
+    ast_summary: Optional[Dict[str, Any]] = None,
     analysis_result: str = "",
     feedback: str = "",
     hint: str = "",
+    memory_prompt: str = "",
+    adaptive_prompt: str = "",
+    previous_findings: Optional[List[Dict[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
     """Ask the LLM to review the code and return findings."""
-    if feedback and (hint or analysis_result):
-        # Refinement pass
+
+    if feedback and (hint or analysis_result or adaptive_prompt):
+        # ── Refinement pass (within-episode adaptive) ──
         hint_section = (
             f"Hint from environment:\n{hint}" if hint else "No hint available."
         )
@@ -247,15 +289,24 @@ def get_findings_from_llm(
             if analysis_result
             else "No analysis available."
         )
+        step_analysis = adaptive_prompt if adaptive_prompt else ""
+        memory_section = memory_prompt if memory_prompt else ""
+
         user_prompt = REFINEMENT_PROMPT.format(
             feedback=feedback,
+            step_analysis=step_analysis,
             hint_section=hint_section,
             analysis_section=analysis_section,
+            memory_section=memory_section,
             code_snippet=code_snippet,
         )
     else:
-        # Initial pass — include AST summary and analysis for context
+        # ── Initial pass — include AST summary, analysis, and memory ──
         context_parts = [f"Task: {task_id}"]
+
+        # Inject cross-episode memory (Level A)
+        if memory_prompt:
+            context_parts.append(memory_prompt)
 
         if ast_summary:
             context_parts.append(
@@ -280,13 +331,22 @@ def get_findings_from_llm(
         user_prompt = "\n".join(context_parts)
 
     content = _call_llm(client, SYSTEM_PROMPT, user_prompt)
-    return _parse_findings(content)
+    findings = _parse_findings(content)
+
+    # ── Filter out known false positives from memory ──
+    if previous_findings:
+        prev_lines = {f.get("line_number") for f in previous_findings}
+        findings = [f for f in findings if f.get("line_number") not in prev_lines]
+
+    return findings
 
 
 def get_fixes_from_llm(
     client: OpenAI,
     code_snippet: str,
     issues: List[Dict[str, Any]],
+    memory_manager: Optional[MemoryManager] = None,
+    task_id: str = "",
 ) -> List[Dict[str, Any]]:
     """Ask the LLM to generate code fixes for detected issues."""
     # Only attempt fixes for security and high-severity bug issues
@@ -300,12 +360,27 @@ def get_fixes_from_llm(
     if not fixable:
         return []
 
-    # Limit to top 3 fixes per step to stay within step budget
+    # Limit to top 3 fixes per step
     fixable = fixable[:3]
+
+    # Build fix memory section
+    fix_memory = ""
+    if memory_manager and task_id:
+        mem = memory_manager.get_task_memory(task_id)
+        if mem and mem.successful_fixes:
+            fix_memory = (
+                "Previously successful fix patterns for this task:\n"
+                + "\n".join(
+                    f"  - {f.get('check_id', '?')}: {f.get('description', '?')}"
+                    for f in mem.successful_fixes
+                )
+                + "\nReuse these patterns where applicable."
+            )
 
     user_prompt = FIX_PROMPT.format(
         code_snippet=code_snippet,
         issues_json=json.dumps(fixable, indent=2),
+        fix_memory=fix_memory,
     )
 
     content = _call_llm(client, SYSTEM_PROMPT, user_prompt)
@@ -317,25 +392,139 @@ def get_fixes_from_llm(
 
 
 # ---------------------------------------------------------------------------
-# Strategic episode runner
+# Strategy execution functions
 # ---------------------------------------------------------------------------
 
 
-def run_episode(task_id: str) -> Dict[str, Any]:
-    """Run a single episode using the full multi-step strategy.
+def _step_ast_analysis(
+    episode_id: str,
+) -> tuple[Dict[str, Any], float, str, bool]:
+    """Execute AST analysis step. Returns (obs, reward, analysis_text, done)."""
+    step_resp = env_step(
+        {
+            "action_type": "run_ast_analysis",
+            "findings": [],
+            "done": False,
+            "metadata": {"episode_id": episode_id},
+        }
+    )
+    obs = step_resp.get("observation", step_resp)
+    reward = step_resp.get("reward", 0.0)
+    done = step_resp.get("done", False)
+    analysis_text = obs.get("analysis_result", "")
+    return obs, reward, analysis_text, done
 
-    Strategy:
-    1. Reset — get code + AST summary
-    2. Run AST analysis — get real static analysis findings
-    3. Initial review — submit findings informed by AST context
-    4. (Medium/Hard) Request hint — learn what's missing
-    5. (If hint reveals gaps) Refinement pass — find more issues
-    6. (Hard) Submit fixes — attempt to fix high-severity issues
-    7. Done
+
+def _step_review(
+    episode_id: str,
+    findings: List[Dict[str, Any]],
+    done: bool = False,
+) -> tuple[Dict[str, Any], float, str, bool]:
+    """Submit review findings. Returns (obs, reward, feedback, done)."""
+    step_resp = env_step(
+        {
+            "action_type": "review",
+            "findings": findings,
+            "done": done,
+            "metadata": {"episode_id": episode_id},
+        }
+    )
+    obs = step_resp.get("observation", step_resp)
+    reward = step_resp.get("reward", 0.0)
+    is_done = step_resp.get("done", False)
+    feedback = obs.get("feedback", "")
+    return obs, reward, feedback, is_done
+
+
+def _step_hint(episode_id: str) -> tuple[Dict[str, Any], float, str, bool]:
+    """Request a hint. Returns (obs, reward, hint_text, done)."""
+    step_resp = env_step(
+        {
+            "action_type": "request_hint",
+            "findings": [],
+            "done": False,
+            "metadata": {"episode_id": episode_id},
+        }
+    )
+    obs = step_resp.get("observation", step_resp)
+    reward = step_resp.get("reward", 0.0)
+    done = step_resp.get("done", False)
+    hint_text = obs.get("hint", "")
+    return obs, reward, hint_text, done
+
+
+def _step_fix(
+    episode_id: str,
+    fixes: List[Dict[str, Any]],
+    done: bool = True,
+) -> tuple[Dict[str, Any], float, Dict[str, Any], bool]:
+    """Submit fixes. Returns (obs, reward, fix_feedback, done)."""
+    step_resp = env_step(
+        {
+            "action_type": "submit_fix",
+            "findings": fixes,
+            "done": done,
+            "metadata": {"episode_id": episode_id},
+        }
+    )
+    obs = step_resp.get("observation", step_resp)
+    reward = step_resp.get("reward", 0.0)
+    is_done = step_resp.get("done", False)
+    fix_feedback = obs.get("fix_feedback", {})
+    return obs, reward, fix_feedback, is_done
+
+
+def _step_done(episode_id: str) -> tuple[Dict[str, Any], float]:
+    """Send done signal. Returns (obs, reward)."""
+    step_resp = env_step(
+        {
+            "action_type": "review",
+            "findings": [],
+            "done": True,
+            "metadata": {"episode_id": episode_id},
+        }
+    )
+    obs = step_resp.get("observation", step_resp)
+    reward = step_resp.get("reward", 0.0)
+    return obs, reward
+
+
+# ---------------------------------------------------------------------------
+# Episode runner with learning
+# ---------------------------------------------------------------------------
+
+
+def run_episode(
+    task_id: str,
+    memory: MemoryManager,
+    round_num: int = 1,
+) -> Dict[str, Any]:
+    """Run a single episode using bandit-selected strategy with memory.
+
+    Returns a result dict with score, strategy, matched/missed/fps for memory update.
     """
+    difficulty = task_id.split("_")[0]  # easy, medium, hard
+
     print(f"\n{'=' * 60}")
-    print(f"  Task: {task_id}")
+    print(f"  Task: {task_id} (round {round_num})")
     print(f"{'=' * 60}")
+
+    # ── Check memory for past attempts ────────────────────────────────
+    task_mem = memory.get_task_memory(task_id)
+    if task_mem and task_mem.attempts > 0:
+        print(
+            f"  [Memory] {task_mem.attempts} previous attempt(s), "
+            f"best={task_mem.best_score:.3f}, last={task_mem.last_score:.3f}"
+        )
+
+    # ── Select strategy via bandit ────────────────────────────────────
+    strategy = memory.select_strategy(difficulty)
+    print(f"  [Strategy] Selected: {strategy}")
+
+    # ── Build memory-enhanced prompt ──────────────────────────────────
+    memory_prompt = memory.build_memory_prompt(task_id)
+    if memory_prompt:
+        print(f"  [Memory] Injecting learning from {task_mem.attempts} past attempt(s)")
 
     client = _create_client()
 
@@ -345,7 +534,6 @@ def run_episode(task_id: str) -> Dict[str, Any]:
     episode_id = obs.get("episode_id", "")
     code_snippet = obs.get("code_snippet", "")
     ast_summary = obs.get("ast_summary", {})
-    available_actions = obs.get("available_actions", ["review"])
 
     print(f"  Episode ID: {episode_id}")
     print(f"  Code: {len(code_snippet)} chars, {code_snippet.count(chr(10))} lines")
@@ -360,115 +548,100 @@ def run_episode(task_id: str) -> Dict[str, Any]:
     step_num = 0
     last_feedback = ""
     analysis_text = ""
+    hint_text = ""
+    all_submitted_findings: List[Dict[str, Any]] = []
+    accumulated_feedback = ParsedFeedback()
 
-    # ── Step 1: Run AST analysis ──────────────────────────────────────
-    if "run_ast_analysis" in available_actions:
+    # ══════════════════════════════════════════════════════════════════
+    # Execute strategy
+    # ══════════════════════════════════════════════════════════════════
+
+    # ── Phase 1: Optional AST analysis ────────────────────────────────
+    use_ast = strategy in ("ast_first", "full_pipeline")
+    if use_ast:
         print(f"\n  [Step {step_num + 1}] Running AST analysis...")
-        step_resp = env_step(
-            {
-                "action_type": "run_ast_analysis",
-                "findings": [],
-                "done": False,
-                "metadata": {"episode_id": episode_id},
-            }
-        )
-        obs = step_resp.get("observation", step_resp)
-        reward = step_resp.get("reward", obs.get("reward", 0.0))
-        done = step_resp.get("done", obs.get("done", False))
-        analysis_text = obs.get("analysis_result", "")
+        obs, reward, analysis_text, done = _step_ast_analysis(episode_id)
         total_reward += reward
         step_num += 1
         print(f"    Reward: {reward:+.3f} (total: {total_reward:.3f})")
         print(f"    Analysis: {analysis_text[:200]}")
         if done:
-            return step_resp
+            return _build_result(task_id, strategy, total_reward, [], step_num)
 
-    # ── Step 2: Initial LLM review with AST context ──────────────────
-    print(f"\n  [Step {step_num + 1}] Querying {MODEL_NAME} for initial findings...")
+    # ── Phase 2: Initial LLM review ──────────────────────────────────
+    print(f"\n  [Step {step_num + 1}] Querying {MODEL_NAME} for findings...")
     findings = get_findings_from_llm(
         client,
         code_snippet,
         task_id,
         ast_summary=ast_summary,
         analysis_result=analysis_text,
+        memory_prompt=memory_prompt,
     )
     print(f"  LLM returned {len(findings)} findings")
 
     if not findings:
         print("  No findings — sending done signal")
-        step_resp = env_step(
-            {
-                "action_type": "review",
-                "findings": [],
-                "done": True,
-                "metadata": {"episode_id": episode_id},
-            }
+        obs, reward = _step_done(episode_id)
+        total_reward += reward
+        return _build_result(task_id, strategy, total_reward, [], step_num + 1)
+
+    # Submit initial findings
+    obs, reward, last_feedback, done = _step_review(episode_id, findings, done=False)
+    total_reward += reward
+    step_num += 1
+    all_submitted_findings.extend(findings)
+    print(f"\n  Step {step_num}: submitted {len(findings)} findings")
+    print(f"    Reward: {reward:+.3f} (total: {total_reward:.3f})")
+    print(f"    Feedback: {last_feedback[:150]}")
+
+    if done:
+        return _build_result(
+            task_id,
+            strategy,
+            total_reward,
+            all_submitted_findings,
+            step_num,
+            feedback=last_feedback,
         )
-        return step_resp
 
-    # Submit initial findings in batches
-    batch_size = 5
-    for i in range(0, len(findings), batch_size):
-        batch = findings[i : i + batch_size]
+    # ── Parse step feedback for adaptive refinement (Level B) ─────────
+    accumulated_feedback = parse_step_feedback(last_feedback)
+    print(
+        f"    [Adaptive] {accumulated_feedback.total_correct} correct, "
+        f"{accumulated_feedback.total_false_positives} FPs"
+    )
 
-        action = {
-            "action_type": "review",
-            "findings": batch,
-            "done": False,
-            "metadata": {"episode_id": episode_id},
-        }
-
-        step_resp = env_step(action)
-        obs = step_resp.get("observation", step_resp)
-        reward = step_resp.get("reward", obs.get("reward", 0.0))
-        done = step_resp.get("done", obs.get("done", False))
-        last_feedback = obs.get("feedback", "")
-
+    # ── Phase 3: Optional hint ────────────────────────────────────────
+    use_hint = strategy in ("review_hint", "ast_first", "full_pipeline")
+    if use_hint and difficulty in ("medium", "hard"):
+        print(f"\n  [Step {step_num + 1}] Requesting hint...")
+        obs, reward, hint_text, done = _step_hint(episode_id)
         total_reward += reward
         step_num += 1
-        print(f"\n  Step {step_num}: submitted {len(batch)} findings")
         print(f"    Reward: {reward:+.3f} (total: {total_reward:.3f})")
-        print(f"    Feedback: {last_feedback[:150]}")
-
+        print(f"    Hint: {hint_text[:150]}")
         if done:
-            return step_resp
-
-    # ── Step 3: For medium/hard, request hint ─────────────────────────
-    difficulty = "easy"
-    if task_id.startswith("medium"):
-        difficulty = "medium"
-    elif task_id.startswith("hard"):
-        difficulty = "hard"
-
-    hint_text = ""
-
-    if difficulty in ("medium", "hard"):
-        available_actions = obs.get("available_actions", [])
-        if "request_hint" in available_actions:
-            print(f"\n  [Step {step_num + 1}] Requesting hint...")
-            step_resp = env_step(
-                {
-                    "action_type": "request_hint",
-                    "findings": [],
-                    "done": False,
-                    "metadata": {"episode_id": episode_id},
-                }
+            return _build_result(
+                task_id,
+                strategy,
+                total_reward,
+                all_submitted_findings,
+                step_num,
+                feedback=last_feedback,
             )
-            obs = step_resp.get("observation", step_resp)
-            reward = step_resp.get("reward", obs.get("reward", 0.0))
-            done = step_resp.get("done", obs.get("done", False))
-            hint_text = obs.get("hint", "")
-            total_reward += reward
-            step_num += 1
-            print(f"    Reward: {reward:+.3f} (total: {total_reward:.3f})")
-            print(f"    Hint: {hint_text[:150]}")
 
-            if done:
-                return step_resp
+    # ── Phase 4: Refinement with adaptive feedback ────────────────────
+    use_refinement = strategy != "review_only"
+    if use_refinement and (
+        hint_text or analysis_text or accumulated_feedback.total_false_positives > 0
+    ):
+        # Build adaptive prompt from parsed feedback
+        adaptive_prompt = memory.build_adaptive_prompt(
+            accumulated_feedback, all_submitted_findings
+        )
 
-    # ── Step 4: Refinement pass with hints ────────────────────────────
-    if hint_text or (analysis_text and difficulty != "easy"):
-        print(f"\n  [Step {step_num + 1}] Refinement pass with hints/analysis...")
+        print(f"\n  [Step {step_num + 1}] Adaptive refinement pass...")
         extra_findings = get_findings_from_llm(
             client,
             code_snippet,
@@ -476,94 +649,171 @@ def run_episode(task_id: str) -> Dict[str, Any]:
             feedback=last_feedback,
             hint=hint_text,
             analysis_result=analysis_text,
+            memory_prompt=memory_prompt,
+            adaptive_prompt=adaptive_prompt,
+            previous_findings=all_submitted_findings,
         )
         print(f"  LLM returned {len(extra_findings)} additional findings")
 
         if extra_findings:
-            # For hard tasks, don't mark done yet — we want to try fixes
-            is_done = difficulty != "hard"
-            action = {
-                "action_type": "review",
-                "findings": extra_findings,
-                "done": is_done,
-                "metadata": {"episode_id": episode_id},
-            }
-            step_resp = env_step(action)
-            obs = step_resp.get("observation", step_resp)
-            reward = step_resp.get("reward", obs.get("reward", 0.0))
-            done = step_resp.get("done", obs.get("done", False))
+            # Don't mark done if we still want to submit fixes
+            want_fixes = strategy == "full_pipeline" and difficulty == "hard"
+            obs, reward, last_feedback, done = _step_review(
+                episode_id, extra_findings, done=not want_fixes
+            )
             total_reward += reward
             step_num += 1
+            all_submitted_findings.extend(extra_findings)
+
+            # Parse refinement feedback too
+            ref_feedback = parse_step_feedback(last_feedback)
             print(
                 f"\n  Step {step_num}: submitted {len(extra_findings)} additional"
-                + (" + done" if is_done else "")
+                f" ({ref_feedback.total_correct} correct, {ref_feedback.total_false_positives} FPs)"
             )
             print(f"    Reward: {reward:+.3f} (total: {total_reward:.3f})")
-            print(f"    Feedback: {obs.get('feedback', '')[:150]}")
 
             if done:
-                return step_resp
+                return _build_result(
+                    task_id,
+                    strategy,
+                    total_reward,
+                    all_submitted_findings,
+                    step_num,
+                    feedback=last_feedback,
+                )
 
-    # ── Step 5: Submit fixes for hard tasks ───────────────────────────
-    if difficulty == "hard" and not obs.get("done", False):
-        # Collect all security findings from our submissions
-        all_security_findings = [
-            f for f in findings if f.get("issue_type") == "security"
+    # ── Phase 5: Optional fix submission ──────────────────────────────
+    use_fixes = strategy == "full_pipeline" and difficulty == "hard"
+    fix_results = []
+    if use_fixes:
+        security_findings = [
+            f for f in all_submitted_findings if f.get("issue_type") == "security"
         ]
-
-        if all_security_findings:
+        if security_findings:
             print(
-                f"\n  [Step {step_num + 1}] Generating fixes for {len(all_security_findings)} security issues..."
+                f"\n  [Step {step_num + 1}] Generating fixes for "
+                f"{len(security_findings)} security issues..."
             )
-            fixes = get_fixes_from_llm(client, code_snippet, all_security_findings)
+            fixes = get_fixes_from_llm(
+                client,
+                code_snippet,
+                security_findings,
+                memory_manager=memory,
+                task_id=task_id,
+            )
             print(f"  LLM returned {len(fixes)} fixes")
 
             if fixes:
-                fix_action = {
-                    "action_type": "submit_fix",
-                    "findings": fixes,
-                    "done": True,
-                    "metadata": {"episode_id": episode_id},
-                }
-                step_resp = env_step(fix_action)
-                obs = step_resp.get("observation", step_resp)
-                reward = step_resp.get("reward", obs.get("reward", 0.0))
+                obs, reward, fix_feedback, done = _step_fix(
+                    episode_id, fixes, done=True
+                )
                 total_reward += reward
                 step_num += 1
-                print(f"\n  Step {step_num}: submitted {len(fixes)} fixes + done")
+                fix_results = parse_fix_feedback(fix_feedback)
+
+                valid_count = sum(1 for f in fix_results if f.get("is_valid"))
+                print(
+                    f"\n  Step {step_num}: submitted {len(fixes)} fixes "
+                    f"({valid_count} valid)"
+                )
                 print(f"    Reward: {reward:+.3f} (total: {total_reward:.3f})")
-                print(f"    Feedback: {obs.get('feedback', '')[:150]}")
-                return step_resp
+
+                return _build_result(
+                    task_id,
+                    strategy,
+                    total_reward,
+                    all_submitted_findings,
+                    step_num,
+                    feedback=last_feedback,
+                    fix_results=fix_results,
+                )
 
     # ── Final done signal ─────────────────────────────────────────────
-    if not obs.get("done", False):
-        print(f"\n  [Step {step_num + 1}] Sending done signal...")
-        step_resp = env_step(
-            {
-                "action_type": "review",
-                "findings": [],
-                "done": True,
-                "metadata": {"episode_id": episode_id},
-            }
-        )
-        obs = step_resp.get("observation", step_resp)
-        reward = step_resp.get("reward", obs.get("reward", 0.0))
-        total_reward += reward
-        print(f"    Final reward: {total_reward:.3f}")
-        print(f"    Feedback: {obs.get('feedback', '')[:150]}")
-        return step_resp
+    print(f"\n  [Step {step_num + 1}] Sending done signal...")
+    obs, reward = _step_done(episode_id)
+    total_reward += reward
+    step_num += 1
+    final_feedback = obs.get("feedback", "")
+    print(f"    Final reward: {total_reward:.3f}")
+    print(f"    Feedback: {final_feedback[:200]}")
 
-    return step_resp
+    return _build_result(
+        task_id,
+        strategy,
+        total_reward,
+        all_submitted_findings,
+        step_num,
+        feedback=final_feedback,
+        fix_results=fix_results,
+    )
+
+
+def _build_result(
+    task_id: str,
+    strategy: str,
+    total_reward: float,
+    findings: List[Dict[str, Any]],
+    steps: int,
+    feedback: str = "",
+    fix_results: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """Build a structured result dict for memory updates."""
+    # Parse final feedback to extract matched/missed/FP info
+    parsed = parse_step_feedback(feedback)
+
+    # Extract descriptions for memory
+    matched_descs = []
+    fp_descs = []
+    for f in findings:
+        line = f.get("line_number", 0)
+        desc = f"{f.get('issue_type', '?')} L{line}: {f.get('description', '')[:80]}"
+        if line in parsed.correct_lines:
+            matched_descs.append(desc)
+        elif line in parsed.false_positive_lines:
+            fp_descs.append(desc)
+
+    # Successful fixes
+    successful_fixes = []
+    if fix_results:
+        for fr in fix_results:
+            if fr.get("is_valid"):
+                successful_fixes.append(
+                    {
+                        "check_id": fr.get("check_id", "?"),
+                        "line": fr.get("line", 0),
+                        "description": fr.get("feedback", ""),
+                    }
+                )
+
+    return {
+        "task_id": task_id,
+        "strategy": strategy,
+        "total_reward": total_reward,
+        "steps": steps,
+        "findings_count": len(findings),
+        "matched": matched_descs,
+        "missed": [],  # We can't know missed from step feedback alone
+        "false_positives": fp_descs,
+        "successful_fixes": successful_fixes,
+        "feedback": feedback,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Main with learning loop
+# ---------------------------------------------------------------------------
 
 
 def main():
-    """Run inference across all configured tasks."""
+    """Run inference with cross-episode learning."""
     print("=" * 60)
-    print("  Code Review Environment — Baseline Inference")
-    print(f"  Environment: {ENV_URL}")
-    print(f"  LLM API:    {API_BASE_URL}")
-    print(f"  Model:      {MODEL_NAME}")
-    print(f"  Tasks:      {len(TASKS)} tasks")
+    print("  Code Review Environment — Learning Inference")
+    print(f"  Environment:  {ENV_URL}")
+    print(f"  LLM API:      {API_BASE_URL}")
+    print(f"  Model:        {MODEL_NAME}")
+    print(f"  Tasks:        {len(TASKS)} tasks")
+    print(f"  Rounds/task:  {NUM_ROUNDS}")
     print("=" * 60)
 
     if not HF_TOKEN:
@@ -577,22 +827,95 @@ def main():
     except Exception as e:
         print(f"\n  [WARN] Health check failed: {e}")
 
-    results = {}
-    for task_id in TASKS:
-        task_id = task_id.strip()
-        if not task_id:
-            continue
-        try:
-            result = run_episode(task_id)
-            results[task_id] = result
-        except Exception as e:
-            print(f"\n  [ERROR] Task {task_id} failed: {e}")
-            results[task_id] = {"error": str(e)}
+    # Initialize memory
+    memory = MemoryManager()
+
+    # Track scores for learning visualization
+    all_results: List[Dict[str, Any]] = []
+
+    for round_num in range(1, NUM_ROUNDS + 1):
+        if NUM_ROUNDS > 1:
+            print(f"\n{'#' * 60}")
+            print(f"  ROUND {round_num} / {NUM_ROUNDS}")
+            print(f"{'#' * 60}")
+
+        round_results = {}
+        for task_id in TASKS:
+            task_id = task_id.strip()
+            if not task_id:
+                continue
+            try:
+                result = run_episode(task_id, memory, round_num)
+                round_results[task_id] = result
+
+                # ── Update memory after each episode ──────────────────
+                memory.update_task_memory(
+                    task_id=task_id,
+                    score=result["total_reward"],
+                    strategy=result["strategy"],
+                    matched=result.get("matched", []),
+                    missed=result.get("missed", []),
+                    false_positives=result.get("false_positives", []),
+                    fixes=result.get("successful_fixes", []),
+                    feedback=result.get("feedback", ""),
+                )
+                memory.update_strategy(result["strategy"], result["total_reward"])
+                memory.save()  # Persist after each episode
+
+            except Exception as e:
+                print(f"\n  [ERROR] Task {task_id} failed: {e}")
+                round_results[task_id] = {"error": str(e), "total_reward": 0.0}
+
+        all_results.append(round_results)
+
+    # ══════════════════════════════════════════════════════════════════
+    # Final report
+    # ══════════════════════════════════════════════════════════════════
+    print(f"\n{'=' * 60}")
+    print("  RESULTS SUMMARY")
+    print(f"{'=' * 60}")
+
+    # Per-task scores across rounds
+    if NUM_ROUNDS > 1:
+        print("\n  Score progression (by round):")
+        for task_id in TASKS:
+            task_id = task_id.strip()
+            scores = []
+            for r in all_results:
+                res = r.get(task_id, {})
+                scores.append(res.get("total_reward", 0.0))
+            trend = " -> ".join(f"{s:.3f}" for s in scores)
+            improved = scores[-1] > scores[0] if len(scores) > 1 else False
+            marker = " ^" if improved else ""
+            print(f"    {task_id:12s}: {trend}{marker}")
+
+    # Final round scores
+    final_round = all_results[-1] if all_results else {}
+    total_score = 0.0
+    count = 0
+    for task_id, result in final_round.items():
+        score = result.get("total_reward", 0.0)
+        strategy = result.get("strategy", "?")
+        total_score += score
+        count += 1
+        print(f"  {task_id:12s}: {score:+.3f}  (strategy: {strategy})")
+
+    if count > 0:
+        print(f"\n  Average score: {total_score / count:.3f}")
+        print(f"  Total score:   {total_score:.3f}")
+
+    # Strategy performance
+    print(f"\n  {memory.get_strategy_summary()}")
+
+    # Memory stats
+    print(f"\n  Memory: {len(memory.task_memories)} tasks learned")
+    print(f"  Memory file: {memory.memory_file}")
 
     print(f"\n{'=' * 60}")
     print("  All episodes complete.")
     print(f"{'=' * 60}")
-    return results
+
+    return all_results
 
 
 if __name__ == "__main__":
