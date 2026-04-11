@@ -54,6 +54,7 @@ x = 100
 print(calcArea(5))
 """,
         "ground_truth": [
+            _issue(1, "style", "low", "Unused import: 'os' is imported but never used"),
             _issue(
                 2, "style", "low", "Unused import: 'sys' is imported but never used"
             ),
@@ -74,6 +75,12 @@ print(calcArea(5))
                 "style",
                 "low",
                 "Function name 'calcArea' should use snake_case (PEP 8)",
+            ),
+            _issue(
+                13,
+                "style",
+                "low",
+                "Unused variable: 'x' is assigned but never used",
             ),
         ],
     },
@@ -246,6 +253,30 @@ Main()
                 "low",
                 "Method name 'LoadData' should use snake_case (PEP 8)",
             ),
+            _issue(
+                16,
+                "bug",
+                "medium",
+                "Resource leak: file handle 'f' is opened but never closed; use 'with' statement",
+            ),
+            _issue(
+                20,
+                "style",
+                "low",
+                "Method name 'getData' should use snake_case: 'get_data' (PEP 8)",
+            ),
+            _issue(
+                23,
+                "style",
+                "low",
+                "Method name 'processRows' should use snake_case: 'process_rows' (PEP 8)",
+            ),
+            _issue(
+                31,
+                "style",
+                "low",
+                "Method name 'SummaryStats' should use snake_case: 'summary_stats' (PEP 8)",
+            ),
         ],
     },
     {
@@ -302,11 +333,24 @@ val = cm.GetValue("threshold")
             _issue(
                 2, "style", "low", "Unused import: 'sys' is imported but never used"
             ),
+            _issue(5, "style", "low", "Unused import: 're' is imported but never used"),
+            _issue(
+                6,
+                "style",
+                "low",
+                "Unused imports: 'Tuple' and 'Optional' from typing are imported but never used",
+            ),
             _issue(
                 10,
                 "style",
                 "low",
                 "Function name 'ReadConfig' should use snake_case (PEP 8)",
+            ),
+            _issue(
+                16,
+                "style",
+                "low",
+                "Function name 'parse_Values' has inconsistent casing; should be 'parse_values' (PEP 8)",
             ),
             _issue(
                 24,
@@ -319,6 +363,18 @@ val = cm.GetValue("threshold")
                 "style",
                 "medium",
                 "Inconsistent constant naming: 'min' should be uppercase MIN for a class constant",
+            ),
+            _issue(
+                32,
+                "style",
+                "low",
+                "Method name 'GetValue' should use snake_case: 'get_value' (PEP 8)",
+            ),
+            _issue(
+                38,
+                "style",
+                "low",
+                "Method name 'SaveConfig' should use snake_case: 'save_config' (PEP 8)",
             ),
         ],
     },
@@ -793,6 +849,15 @@ def list_data_directory():
     # Safe: subprocess with list args, no shell injection possible
     result = subprocess.run(["ls", "-la", "/var/data"], capture_output=True, text=True, check=True)
     return result.stdout.splitlines()
+
+def verify_token(provided_token, expected_token):
+    return provided_token == expected_token
+
+def get_user_safe(conn, username):
+    # Uses parameterized query — safe
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM users WHERE username = ?", (username,))
+    return cursor.fetchone()
 """,
         "ground_truth": [
             _issue(
@@ -830,6 +895,12 @@ def list_data_directory():
                 "security",
                 "high",
                 "Path traversal: user-controlled 'filename' concatenated to path; attacker can use '../' to read arbitrary files",
+            ),
+            _issue(
+                35,
+                "security",
+                "medium",
+                "Timing side-channel: string comparison with '==' leaks token length via timing; use hmac.compare_digest()",
             ),
         ],
     },
@@ -871,6 +942,14 @@ def create_temp_file(content):
 def sanitize_html(html_input):
     clean = re.sub(r"<script>", "", html_input)
     return clean
+
+def validate_email(email_str):
+    pattern = r"^([a-zA-Z0-9_.+-]+)+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$"
+    return bool(re.match(pattern, email_str))
+
+def hash_password_safe(password, salt):
+    # Intentionally uses SHA-256 (better than MD5 but still not bcrypt/argon2)
+    return hashlib.sha256((salt + password).encode()).hexdigest()
 """,
         "ground_truth": [
             _issue(
@@ -914,6 +993,12 @@ def sanitize_html(html_input):
                 "security",
                 "high",
                 "Incomplete HTML sanitisation: only removes '<script>' tag; does not handle variations like '<SCRIPT>', '<script >', event handlers, etc.",
+            ),
+            _issue(
+                34,
+                "security",
+                "medium",
+                "ReDoS vulnerability: regex pattern with nested quantifiers '([a-zA-Z0-9_.+-]+)+' causes catastrophic backtracking on malicious input",
             ),
         ],
     },
@@ -963,6 +1048,13 @@ def generate_password(length=8):
 def process_user_input(data_str):
     result = eval(data_str)
     return result
+
+def safe_read_file(filepath):
+    if os.path.exists(filepath):
+        # Time gap between check and use: another process could swap the file
+        with open(filepath, "r") as f:
+            return f.read()
+    return None
 """,
         "ground_truth": [
             _issue(
@@ -1006,6 +1098,12 @@ def process_user_input(data_str):
                 "security",
                 "critical",
                 "Code injection: 'eval(data_str)' on untrusted input allows arbitrary code execution",
+            ),
+            _issue(
+                43,
+                "security",
+                "medium",
+                "TOCTOU race condition: os.path.exists() check followed by open() allows symlink attacks between check and use",
             ),
         ],
     },
@@ -1098,10 +1196,22 @@ def check_permission(user, resource):
                 "JWT algorithm 'none': signing with algorithm='none' produces unsigned tokens anyone can forge",
             ),
             _issue(
+                18,
+                "security",
+                "high",
+                "JWT missing expiration: payload has no 'exp' claim so tokens never expire; compromised tokens are valid forever",
+            ),
+            _issue(
                 26,
                 "security",
                 "critical",
                 "JWT algorithms list includes 'none': allows attackers to submit unsigned tokens that will be accepted",
+            ),
+            _issue(
+                27,
+                "bug",
+                "medium",
+                "Bare except clause: catches all exceptions including KeyboardInterrupt and SystemExit; use specific exception types",
             ),
             _issue(
                 33,
@@ -1303,6 +1413,18 @@ class RequestHandler(BaseHTTPRequestHandler):
                 "security",
                 "critical",
                 "Command injection: os.system with user-controlled action from webhook data; use subprocess with list args",
+            ),
+            _issue(
+                2,
+                "style",
+                "low",
+                "Unused import: 're' is imported but never used in this module",
+            ),
+            _issue(
+                6,
+                "style",
+                "low",
+                "Unused import: 'hmac' is imported but never used; WEBHOOK_SECRET exists but no HMAC verification is implemented",
             ),
         ],
     },

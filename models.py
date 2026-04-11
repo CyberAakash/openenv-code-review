@@ -138,10 +138,14 @@ class CodeReviewObservation(Observation):
 class GroundTruthIssue(BaseModel):
     """A single ground-truth issue annotated in the task."""
 
-    line_number: int
-    issue_type: str  # style | bug | security
-    severity: str  # low | medium | high | critical
-    description: str
+    line_number: int = Field(..., description="1-indexed line number of the issue")
+    issue_type: Literal["style", "bug", "security"] = Field(
+        ..., description="Issue category: style, bug, or security"
+    )
+    severity: Literal["low", "medium", "high", "critical"] = Field(
+        ..., description="Severity level of the issue"
+    )
+    description: str = Field(..., description="Human-readable description of the issue")
 
 
 class EpisodeState(BaseModel):

@@ -5,8 +5,23 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "code-review-env"
 version = "0.1.0"
-description = "OpenEnv RL environment for AI-powered code review"
+description = "OpenEnv RL environment for AI-powered code review — style, bug, and security issue detection across 15 Python tasks"
 requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Santhosh", email = "santhoshmetheofficial@gmail.com"},
+    {name = "Aakash T", email = "aakashvnth@gmail.com"},
+    {name = "Sriram", email = "sriramsrit.2002@gmail.com"},
+]
+keywords = ["openenv", "reinforcement-learning", "code-review", "ai-agent", "security"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Software Development :: Quality Assurance",
+]
 dependencies = [
     "openenv-core[core]>=0.2.2",
     "fastapi>=0.110.0",
@@ -17,6 +32,10 @@ dependencies = [
 
 [project.scripts]
 server = "server.app:main"
+
+[project.urls]
+Homepage = "https://huggingface.co/spaces/CyberAakash/code-review"
+Repository = "https://github.com/CyberAakash/openenv-code-review"
 
 [project.optional-dependencies]
 inference = [

@@ -35,7 +35,7 @@ An OpenEnv RL environment where an AI agent reviews Python code snippets and ide
 
 ### Core Environment
 - **15 tasks** across 3 difficulty levels (easy/medium/hard)
-- **3 action types** per step: `review`, `request_hint`, `request_analysis` — creating an exploration vs. exploitation tradeoff
+- **4 action types** per step: `review`, `request_hint`, `run_ast_analysis`, `submit_fix` — creating an exploration vs. exploitation tradeoff
 - **Rich grading system**: line-number matching (+-2 tolerance), issue type matching, description keyword similarity, severity accuracy, F1 scoring, step efficiency bonus
 - **Multi-step episodes**: up to 10 steps per episode with cumulative reward tracking
 - **Full OpenEnv spec compliance**: passes `openenv validate` on all 4 deployment modes
@@ -70,7 +70,8 @@ An OpenEnv RL environment where an AI agent reviews Python code snippets and ide
 |------------|------|--------|-------|
 | `review` | Free | Submit findings for grading | Unlimited |
 | `request_hint` | -0.05 reward | Reveals unfound issue categories + approximate line ranges | 3 per episode |
-| `request_analysis` | -0.10 reward | Simulated static analysis revealing 2 obvious issues | 1 per episode |
+| `run_ast_analysis` | -0.05 reward | Runs real AST-based static analysis revealing actual code issues | 1 per episode |
+| `submit_fix` | Free | Submit code fixes for detected issues; +0.10 per valid fix | Unlimited |
 
 ---
 
@@ -125,8 +126,9 @@ No setup needed -- just open the URL in any browser.
 2. Click on code lines to report issues
 3. Fill in issue type (style/bug/security), severity, and description
 4. Click **"Submit Finding"** to send it to the grader
-5. Use **"Request Hint"** (-0.05) or **"Request Analysis"** (-0.10) for help
-6. Click **"Finalize"** when done to see your final score
+5. Use **"Request Hint"** (-0.05) or **"Run AST Analysis"** (-0.05) for help
+6. Use **"Submit Fix"** to propose code fixes for bonus points
+7. Click **"Finalize"** when done to see your final score
 
 ### Test API Endpoints
 
@@ -237,7 +239,7 @@ uv run openenv validate --url https://CyberAakash-code-review.hf.space
   "feedback": "Correct: matched ground truth issue",
   "hint": "",
   "analysis_result": "",
-  "available_actions": ["review", "request_hint", "request_analysis"]
+  "available_actions": ["review", "request_hint", "run_ast_analysis", "submit_fix"]
 }
 ```
 
@@ -249,11 +251,12 @@ uv run openenv validate --url https://CyberAakash-code-review.hf.space
 | Description accuracy bonus | up to `+0.05` for keyword overlap with ground truth |
 | Severity accuracy bonus | `+0.05` (exact), `0.0` (off by one), `-0.02` (off by two+) |
 | Duplicate finding | `0.0` |
-| False positive | `-0.1` |
-| Done bonus | `+0.3 * recall - 0.05 * false_positive_count` |
+| False positive (per step) | `-0.08` |
+| Valid fix (submit_fix) | `+0.10` per matching fix |
+| Done bonus | `+0.3 * recall - 0.08 * false_positive_count` |
 | Step efficiency bonus | up to `+0.15` (linear decay with steps used) |
 | Hint cost | `-0.05` per hint (max 3) |
-| Analysis cost | `-0.10` (max 1) |
+| AST analysis cost | `-0.05` (max 1) |
 
 ---
 
@@ -298,3 +301,36 @@ openenv-code-review/
 ## License
 
 Built for the OpenEnv Hackathon. MIT License.
+
+---
+
+## Design Decisions
+
+### Why Code Review as an RL Environment?
+
+Code review is a genuine software engineering task performed daily by millions of developers. Unlike toy environments, an agent trained here develops skills directly transferable to real-world code quality tooling. The environment models the iterative nature of real reviews: scan code, identify issues, request additional analysis, propose fixes, and refine.
+
+### Exploration vs. Exploitation Tradeoff
+
+The 4 action types create a meaningful decision space:
+- **review** (free): Submit findings immediately, but risk missing subtle issues
+- **request_hint** (-0.05): Spend reward to get clues about unfound issues — worthwhile for hard tasks but wasteful for easy ones
+- **run_ast_analysis** (-0.05): Get real AST-based analysis — valuable for structural issues, but costs reward and only available once
+- **submit_fix** (free): Propose code fixes for bonus points — only pays off if findings are accurate
+
+An optimal agent must decide when the information gain from hints/analysis justifies the cost, and when to stop reviewing and finalize.
+
+### Difficulty Progression
+
+Tasks are designed so that difficulty genuinely increases:
+- **Easy**: Surface-level style issues (unused imports, naming violations) — any model can find these
+- **Medium**: Logic bugs requiring understanding of control flow (off-by-one errors, wrong operators, missing edge cases)
+- **Hard**: Security vulnerabilities requiring domain expertise (timing side-channels, ReDoS, TOCTOU race conditions, JWT misconfigurations) — designed to challenge frontier models
+
+### False Positive Penalty Design
+
+False positive penalties (-0.08 per-step, -0.08 at finalization) are calibrated to make brute-force spam unprofitable. A correct critical finding yields +0.30, so an agent must be >79% precise to profit from guessing. This rewards models that reason carefully over those that enumerate possibilities.
+
+### Ground Truth Completeness
+
+Ground truth includes not just the "obvious" issues but also subtle ones (unused imports that happen to exist, naming convention violations alongside security bugs). This prevents penalizing thorough models that correctly identify real issues the ground truth previously missed.

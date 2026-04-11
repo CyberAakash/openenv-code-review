@@ -517,6 +517,7 @@ class CodeReviewEnvironment(
         step_reward = 0.0
         feedbacks: List[str] = []
         fix_results: Dict[str, Any] = {"fixes": [], "total_bonus": 0.0}
+        state.review_steps += 1  # Count fix submissions for efficiency bonus
 
         if not action.findings:
             feedbacks.append(
@@ -524,6 +525,15 @@ class CodeReviewEnvironment(
             )
         else:
             for finding in action.findings:
+                # ── Duplicate fix check ──────────────────────────────
+                if _is_duplicate(finding, state.submitted_findings):
+                    feedbacks.append(
+                        f"Line {finding.line_number} ({finding.issue_type}): duplicate fix — ignored"
+                    )
+                    continue
+
+                # Track in submitted_findings so duplicates and FP count at finalization
+                state.submitted_findings.append(finding)
                 state.fixes_submitted += 1
 
                 if not finding.fix_code:
@@ -538,6 +548,23 @@ class CodeReviewEnvironment(
                     state.ground_truth,
                     [],  # Don't filter by matched — allow fixing any
                 )
+
+                if not is_match:
+                    # Fix for a non-existent issue — treat as false positive
+                    step_reward -= 0.03
+                    feedbacks.append(
+                        f"Line {finding.line_number} fix: no matching issue found (-0.030)"
+                    )
+                    fix_results["fixes"].append(
+                        {
+                            "line": finding.line_number,
+                            "check_id": "UNKNOWN",
+                            "is_valid": False,
+                            "score": 0.0,
+                            "feedback": "No matching ground truth issue at this line",
+                        }
+                    )
+                    continue
 
                 # Determine the check_id for this finding
                 # Use AST analysis to figure out what check applies at this line
@@ -644,10 +671,10 @@ class CodeReviewEnvironment(
                         f"(+{reward_delta:.3f}, base={base_reward:.3f}, bonus={extra_bonus:+.3f})"
                     )
                 else:
-                    # Small per-step signal for false positives (main penalty at finalization)
-                    step_reward -= 0.03
+                    # Per-step signal for false positives (main penalty at finalization)
+                    step_reward -= 0.08
                     feedbacks.append(
-                        f"Line {finding.line_number} ({finding.issue_type}): FALSE POSITIVE (-0.030)"
+                        f"Line {finding.line_number} ({finding.issue_type}): FALSE POSITIVE (-0.080)"
                     )
 
                 state.submitted_findings.append(finding)
@@ -697,7 +724,7 @@ class CodeReviewEnvironment(
         recall_bonus = 0.3 * recall
 
         # False-positive penalty
-        fp_penalty = 0.05 * false_positives
+        fp_penalty = 0.08 * false_positives
 
         # Step efficiency bonus
         efficiency_bonus = _step_efficiency_bonus(state)

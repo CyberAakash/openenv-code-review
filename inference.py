@@ -55,7 +55,10 @@ from memory import (
 # Hackathon-required variables
 API_BASE_URL = os.environ.get("API_BASE_URL", "https://api.openai.com/v1")
 MODEL_NAME = os.environ.get("MODEL_NAME", "gpt-4o-mini")
-HF_TOKEN = os.environ.get("HF_TOKEN", "")
+HF_TOKEN = os.environ.get("HF_TOKEN")
+
+if HF_TOKEN is None:
+    raise ValueError("HF_TOKEN environment variable is required")
 
 # Environment server URL
 ENV_URL = os.environ.get("ENV_URL", "https://CyberAakash-code-review.hf.space")
@@ -214,7 +217,7 @@ Example:
 def _create_client() -> OpenAI:
     """Create an OpenAI client with the configured API settings."""
     return OpenAI(
-        api_key=HF_TOKEN or "dummy",
+        api_key=HF_TOKEN,
         base_url=API_BASE_URL,
     )
 
@@ -496,17 +499,32 @@ def _step_done(episode_id: str) -> tuple[Dict[str, Any], float]:
 
 def _emit_start(task_id: str) -> None:
     """Emit structured [START] block for the validator."""
-    print(f"[START] task={task_id}", flush=True)
+    print(f"[START] task={task_id} env=code-review model={MODEL_NAME}", flush=True)
 
 
-def _emit_step(step_num: int, reward: float) -> None:
+def _emit_step(
+    step_num: int,
+    action: str,
+    reward: float,
+    done: bool,
+    error: str | None = None,
+) -> None:
     """Emit structured [STEP] block for the validator."""
-    print(f"[STEP] step={step_num} reward={reward:.4f}", flush=True)
+    err_str = error if error else "null"
+    done_str = "true" if done else "false"
+    print(
+        f"[STEP] step={step_num} action={action} reward={reward:.2f} done={done_str} error={err_str}",
+        flush=True,
+    )
 
 
-def _emit_end(task_id: str, score: float, steps: int) -> None:
+def _emit_end(success: bool, steps: int, rewards: list[float]) -> None:
     """Emit structured [END] block for the validator."""
-    print(f"[END] task={task_id} score={score:.4f} steps={steps}", flush=True)
+    success_str = "true" if success else "false"
+    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
+    print(
+        f"[END] success={success_str} steps={steps} rewards={rewards_str}", flush=True
+    )
 
 
 def run_episode(
@@ -569,6 +587,7 @@ def run_episode(
     hint_text = ""
     all_submitted_findings: List[Dict[str, Any]] = []
     accumulated_feedback = ParsedFeedback()
+    episode_rewards: List[float] = []  # collect per-step rewards for [END] output
 
     # ══════════════════════════════════════════════════════════════════
     # Execute strategy
@@ -581,11 +600,12 @@ def run_episode(
         obs, reward, analysis_text, done = _step_ast_analysis(episode_id)
         total_reward += reward
         step_num += 1
-        _emit_step(step_num, reward)
+        episode_rewards.append(reward)
+        _emit_step(step_num, "run_ast_analysis", reward, done)
         print(f"    Reward: {reward:+.3f} (total: {total_reward:.3f})")
         print(f"    Analysis: {analysis_text[:200]}")
         if done:
-            _emit_end(task_id, total_reward, step_num)
+            _emit_end(total_reward > 0, step_num, episode_rewards)
             return _build_result(task_id, strategy, total_reward, [], step_num)
 
     # ── Phase 2: Initial LLM review ──────────────────────────────────
@@ -605,8 +625,9 @@ def run_episode(
         obs, reward = _step_done(episode_id)
         total_reward += reward
         step_num += 1
-        _emit_step(step_num, reward)
-        _emit_end(task_id, total_reward, step_num)
+        episode_rewards.append(reward)
+        _emit_step(step_num, "review", reward, True)
+        _emit_end(total_reward > 0, step_num, episode_rewards)
         return _build_result(task_id, strategy, total_reward, [], step_num)
 
     # Submit initial findings
@@ -614,13 +635,14 @@ def run_episode(
     total_reward += reward
     step_num += 1
     all_submitted_findings.extend(findings)
-    _emit_step(step_num, reward)
+    episode_rewards.append(reward)
+    _emit_step(step_num, "review", reward, done)
     print(f"\n  Step {step_num}: submitted {len(findings)} findings")
     print(f"    Reward: {reward:+.3f} (total: {total_reward:.3f})")
     print(f"    Feedback: {last_feedback[:150]}")
 
     if done:
-        _emit_end(task_id, total_reward, step_num)
+        _emit_end(total_reward > 0, step_num, episode_rewards)
         return _build_result(
             task_id,
             strategy,
@@ -644,11 +666,12 @@ def run_episode(
         obs, reward, hint_text, done = _step_hint(episode_id)
         total_reward += reward
         step_num += 1
-        _emit_step(step_num, reward)
+        episode_rewards.append(reward)
+        _emit_step(step_num, "request_hint", reward, done)
         print(f"    Reward: {reward:+.3f} (total: {total_reward:.3f})")
         print(f"    Hint: {hint_text[:150]}")
         if done:
-            _emit_end(task_id, total_reward, step_num)
+            _emit_end(total_reward > 0, step_num, episode_rewards)
             return _build_result(
                 task_id,
                 strategy,
@@ -691,7 +714,8 @@ def run_episode(
             total_reward += reward
             step_num += 1
             all_submitted_findings.extend(extra_findings)
-            _emit_step(step_num, reward)
+            episode_rewards.append(reward)
+            _emit_step(step_num, "review", reward, done)
 
             # Parse refinement feedback too
             ref_feedback = parse_step_feedback(last_feedback)
@@ -702,7 +726,7 @@ def run_episode(
             print(f"    Reward: {reward:+.3f} (total: {total_reward:.3f})")
 
             if done:
-                _emit_end(task_id, total_reward, step_num)
+                _emit_end(total_reward > 0, step_num, episode_rewards)
                 return _build_result(
                     task_id,
                     strategy,
@@ -740,7 +764,8 @@ def run_episode(
                 total_reward += reward
                 step_num += 1
                 fix_results = parse_fix_feedback(fix_feedback)
-                _emit_step(step_num, reward)
+                episode_rewards.append(reward)
+                _emit_step(step_num, "submit_fix", reward, done)
 
                 valid_count = sum(1 for f in fix_results if f.get("is_valid"))
                 print(
@@ -749,7 +774,7 @@ def run_episode(
                 )
                 print(f"    Reward: {reward:+.3f} (total: {total_reward:.3f})")
 
-                _emit_end(task_id, total_reward, step_num)
+                _emit_end(total_reward > 0, step_num, episode_rewards)
                 return _build_result(
                     task_id,
                     strategy,
@@ -766,11 +791,12 @@ def run_episode(
     total_reward += reward
     step_num += 1
     final_feedback = obs.get("feedback", "")
-    _emit_step(step_num, reward)
+    episode_rewards.append(reward)
+    _emit_step(step_num, "review", reward, True)
     print(f"    Final reward: {total_reward:.3f}")
     print(f"    Feedback: {final_feedback[:200]}")
 
-    _emit_end(task_id, total_reward, step_num)
+    _emit_end(total_reward > 0, step_num, episode_rewards)
     return _build_result(
         task_id,
         strategy,
@@ -849,10 +875,6 @@ def main():
     print(f"  Rounds/task:  {NUM_ROUNDS}")
     print("=" * 60)
 
-    if not HF_TOKEN:
-        print("\n  [WARN] HF_TOKEN not set — LLM calls will likely fail.")
-        print("         Set the HF_TOKEN environment variable to your API key.")
-
     # Health check
     try:
         health = requests.get(f"{ENV_URL}/health", timeout=10)
@@ -897,6 +919,9 @@ def main():
 
             except Exception as e:
                 print(f"\n  [ERROR] Task {task_id} failed: {e}")
+                # Spec requires [START]+[END] even on exception
+                _emit_start(task_id)
+                _emit_end(False, 0, [])
                 round_results[task_id] = {"error": str(e), "total_reward": 0.0}
 
         all_results.append(round_results)
