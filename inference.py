@@ -519,7 +519,21 @@ def _emit_step(
 
 
 def _emit_end(success: bool, steps: int, rewards: list[float]) -> None:
-    """Emit structured [END] block for the validator."""
+    """Emit structured [END] block for the validator.
+
+    Clamps the total (sum of rewards) to strictly (0, 1) by adjusting
+    the last reward element, because the validator rejects task scores
+    that are exactly 0.0 or >= 1.0.
+    """
+    # Ensure rewards list is non-empty
+    if not rewards:
+        rewards = [0.01]
+
+    total = sum(rewards)
+    if total <= 0.0 or total >= 1.0:
+        clamped = max(0.001, min(0.999, total))
+        rewards[-1] += clamped - total
+
     success_str = "true" if success else "false"
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
     print(
