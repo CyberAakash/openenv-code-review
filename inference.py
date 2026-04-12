@@ -617,9 +617,14 @@ def run_episode(
     if use_ast:
         print(f"\n  [Step {step_num + 1}] Running AST analysis...")
         obs, reward, analysis_text, done = _step_ast_analysis(episode_id)
-        total_reward += reward
         step_num += 1
-        episode_rewards.append(reward)
+        if done:
+            # done=True reward is the clamped total score, not a delta
+            total_reward = reward
+            episode_rewards = [reward]
+        else:
+            total_reward += reward
+            episode_rewards.append(reward)
         _emit_step(step_num, "run_ast_analysis", reward, done)
         print(f"    Reward: {reward:+.3f} (total: {total_reward:.3f})")
         print(f"    Analysis: {analysis_text[:200]}")
@@ -642,19 +647,25 @@ def run_episode(
     if not findings:
         print("  No findings — sending done signal")
         obs, reward = _step_done(episode_id)
-        total_reward += reward
+        # done=True reward is the clamped total score, not a delta
+        total_reward = reward
         step_num += 1
-        episode_rewards.append(reward)
+        episode_rewards = [reward]
         _emit_step(step_num, "review", reward, True)
         _emit_end(total_reward > 0, step_num, episode_rewards)
         return _build_result(task_id, strategy, total_reward, [], step_num)
 
     # Submit initial findings
     obs, reward, last_feedback, done = _step_review(episode_id, findings, done=False)
-    total_reward += reward
     step_num += 1
     all_submitted_findings.extend(findings)
-    episode_rewards.append(reward)
+    if done:
+        # done=True reward is the clamped total score, not a delta
+        total_reward = reward
+        episode_rewards = [reward]
+    else:
+        total_reward += reward
+        episode_rewards.append(reward)
     _emit_step(step_num, "review", reward, done)
     print(f"\n  Step {step_num}: submitted {len(findings)} findings")
     print(f"    Reward: {reward:+.3f} (total: {total_reward:.3f})")
@@ -683,9 +694,14 @@ def run_episode(
     if use_hint and difficulty in ("medium", "hard"):
         print(f"\n  [Step {step_num + 1}] Requesting hint...")
         obs, reward, hint_text, done = _step_hint(episode_id)
-        total_reward += reward
         step_num += 1
-        episode_rewards.append(reward)
+        if done:
+            # done=True reward is the clamped total score, not a delta
+            total_reward = reward
+            episode_rewards = [reward]
+        else:
+            total_reward += reward
+            episode_rewards.append(reward)
         _emit_step(step_num, "request_hint", reward, done)
         print(f"    Reward: {reward:+.3f} (total: {total_reward:.3f})")
         print(f"    Hint: {hint_text[:150]}")
@@ -730,10 +746,15 @@ def run_episode(
             obs, reward, last_feedback, done = _step_review(
                 episode_id, extra_findings, done=not want_fixes
             )
-            total_reward += reward
             step_num += 1
             all_submitted_findings.extend(extra_findings)
-            episode_rewards.append(reward)
+            if done:
+                # done=True reward is the clamped total score, not a delta
+                total_reward = reward
+                episode_rewards = [reward]
+            else:
+                total_reward += reward
+                episode_rewards.append(reward)
             _emit_step(step_num, "review", reward, done)
 
             # Parse refinement feedback too
@@ -780,10 +801,15 @@ def run_episode(
                 obs, reward, fix_feedback, done = _step_fix(
                     episode_id, fixes, done=True
                 )
-                total_reward += reward
                 step_num += 1
                 fix_results = parse_fix_feedback(fix_feedback)
-                episode_rewards.append(reward)
+                if done:
+                    # done=True reward is the clamped total score, not a delta
+                    total_reward = reward
+                    episode_rewards = [reward]
+                else:
+                    total_reward += reward
+                    episode_rewards.append(reward)
                 _emit_step(step_num, "submit_fix", reward, done)
 
                 valid_count = sum(1 for f in fix_results if f.get("is_valid"))
@@ -807,10 +833,11 @@ def run_episode(
     # ── Final done signal ─────────────────────────────────────────────
     print(f"\n  [Step {step_num + 1}] Sending done signal...")
     obs, reward = _step_done(episode_id)
-    total_reward += reward
+    # done=True reward is the clamped total score, not a delta
+    total_reward = reward
     step_num += 1
     final_feedback = obs.get("feedback", "")
-    episode_rewards.append(reward)
+    episode_rewards = [reward]
     _emit_step(step_num, "review", reward, True)
     print(f"    Final reward: {total_reward:.3f}")
     print(f"    Feedback: {final_feedback[:200]}")

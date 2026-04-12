@@ -767,9 +767,13 @@ class CodeReviewEnvironment(
         )
         state.last_feedback = final_feedback
         self._set_state(state)
+        # Return the clamped total reward (0.01–0.99) as the final score
+        # when done=True.  The validator treats the reward on the terminal
+        # step as the task score, so it MUST be in the open interval (0, 1).
+        # Intermediate (non-terminal) steps still return per-step deltas.
         return self._make_observation(
             state,
-            reward=step_reward,
+            reward=state.total_reward,
             feedback=final_feedback,
             hint=hint,
             analysis=analysis,
