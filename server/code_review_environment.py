@@ -366,7 +366,7 @@ class CodeReviewEnvironment(
         ast_summary_data = get_ast_summary(state.code_snippet)
 
         return CodeReviewObservation(
-            reward=0.0,
+            reward=0.01,
             done=False,
             metadata={"episode_id": episode_id, "available_tasks": list_task_ids()},
             episode_id=episode_id,
@@ -816,12 +816,10 @@ class CodeReviewEnvironment(
         analysis: str = "",
         fix_feedback: Optional[Dict[str, Any]] = None,
     ) -> CodeReviewObservation:
-        # When the episode is done the reward IS the final task score and
-        # must be strictly in (0, 1).  Apply a last-resort clamp so that
-        # any code path that skips _finalize_episode's clamping still
-        # produces a valid score.
-        if state.done:
-            reward = max(0.01, min(0.99, reward))
+        # The validator requires EVERY reward returned by the grader to be
+        # strictly in (0, 1).  Clamp unconditionally so intermediate step
+        # deltas (0.0, negative costs) and terminal scores all comply.
+        reward = max(0.01, min(0.99, reward))
         return CodeReviewObservation(
             reward=reward,
             done=state.done,

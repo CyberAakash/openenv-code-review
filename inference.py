@@ -540,8 +540,13 @@ def _emit_end(success: bool, steps: int, rewards: list[float]) -> None:
     if not rewards:
         rewards = [0.01]
 
+    # Clamp EACH element individually so no single value is out of (0, 1)
+    rewards = [_clamp_score(r) for r in rewards]
+
     # Round to 2 dp first so we reason about what the validator will see
     rewards = [round(r, 2) for r in rewards]
+    # Re-clamp after rounding in case 0.005 rounded to 0.00 or 0.995 to 1.00
+    rewards = [max(0.01, min(0.99, r)) for r in rewards]
     total = round(sum(rewards), 2)
 
     if total <= 0.0:
@@ -570,7 +575,10 @@ def _clamp_score(val: float) -> float:
     Use 0.01 / 0.99 as the safe boundaries so the value also survives
     :.2f formatting without rounding back to 0.00 or 1.00.
     """
-    return max(0.01, min(0.99, val))
+    import math
+    if val is None or not isinstance(val, (int, float)) or not math.isfinite(val):
+        return 0.50
+    return max(0.01, min(0.99, float(val)))
 
 
 def run_episode(
@@ -583,6 +591,10 @@ def run_episode(
     Returns a result dict with score, strategy, matched/missed/fps for memory update.
     """
     difficulty = task_id.split("_")[0]  # easy, medium, hard
+
+    # Emit [START] immediately so every code path below has a matching
+    # [START]/[END] pair visible to the validator.
+    _emit_start(task_id)
 
     print(f"\n{'=' * 60}")
     print(f"  Task: {task_id} (round {round_num})")
@@ -606,11 +618,6 @@ def run_episode(
         print(f"  [Memory] Injecting learning from {task_mem.attempts} past attempt(s)")
 
     client = _create_client()
-
-    # ── Emit structured [START] for validator ──────────────────────
-    # Must be emitted before any step or exception so the validator
-    # always sees a matching [START]/[END] pair for this task.
-    _emit_start(task_id)
 
     # ── Step 0: Reset environment ─────────────────────────────────────
     reset_resp = env_reset(task_id)
@@ -653,7 +660,7 @@ def run_episode(
             episode_rewards = [total_reward]
         else:
             total_reward += reward
-            episode_rewards.append(reward)
+            episode_rewards.append(_clamp_score(reward))
         _emit_step(step_num, "run_ast_analysis", reward, done)
         print(f"    Reward: {reward:+.3f} (total: {total_reward:.3f})")
         print(f"    Analysis: {analysis_text[:200]}")
@@ -694,7 +701,7 @@ def run_episode(
         episode_rewards = [total_reward]
     else:
         total_reward += reward
-        episode_rewards.append(reward)
+        episode_rewards.append(_clamp_score(reward))
     _emit_step(step_num, "review", reward, done)
     print(f"\n  Step {step_num}: submitted {len(findings)} findings")
     print(f"    Reward: {reward:+.3f} (total: {total_reward:.3f})")
@@ -730,7 +737,7 @@ def run_episode(
             episode_rewards = [total_reward]
         else:
             total_reward += reward
-            episode_rewards.append(reward)
+            episode_rewards.append(_clamp_score(reward))
         _emit_step(step_num, "request_hint", reward, done)
         print(f"    Reward: {reward:+.3f} (total: {total_reward:.3f})")
         print(f"    Hint: {hint_text[:150]}")
@@ -783,7 +790,7 @@ def run_episode(
                 episode_rewards = [total_reward]
             else:
                 total_reward += reward
-                episode_rewards.append(reward)
+                episode_rewards.append(_clamp_score(reward))
             _emit_step(step_num, "review", reward, done)
 
             # Parse refinement feedback too
@@ -838,7 +845,7 @@ def run_episode(
                     episode_rewards = [total_reward]
                 else:
                     total_reward += reward
-                    episode_rewards.append(reward)
+                    episode_rewards.append(_clamp_score(reward))
                 _emit_step(step_num, "submit_fix", reward, done)
 
                 valid_count = sum(1 for f in fix_results if f.get("is_valid"))
@@ -978,29 +985,27 @@ def main():
             try:
                 result = run_episode(task_id, memory, round_num)
                 round_results[task_id] = result
-
-                # ── Update memory after each episode ──────────────────
-                memory.update_task_memory(
-                    task_id=task_id,
-                    score=result["total_reward"],
-                    strategy=result["strategy"],
-                    matched=result.get("matched", []),
-                    missed=result.get("missed", []),
-                    false_positives=result.get("false_positives", []),
-                    fixes=result.get("successful_fixes", []),
-                    feedback=result.get("feedback", ""),
-                )
-                memory.update_strategy(result["strategy"], result["total_reward"])
-                memory.save()  # Persist after each episode
-
             except Exception as e:
                 print(f"\n  [ERROR] Task {task_id} failed: {e}")
-                # Spec requires [START]+[END] even on exception.
-                # _emit_start is already called inside run_episode before any
-                # work begins, so only emit [END] here to avoid a duplicate
-                # [START] that could confuse the validator.
-                _emit_end(False, 0, [])
+                _emit_step(1, "review", 0.01, True, error=str(e))
+                _emit_end(False, 1, [0.01])
                 round_results[task_id] = {"error": str(e), "total_reward": 0.01}
+            else:
+                try:
+                    memory.update_task_memory(
+                        task_id=task_id,
+                        score=result["total_reward"],
+                        strategy=result["strategy"],
+                        matched=result.get("matched", []),
+                        missed=result.get("missed", []),
+                        false_positives=result.get("false_positives", []),
+                        fixes=result.get("successful_fixes", []),
+                        feedback=result.get("feedback", ""),
+                    )
+                    memory.update_strategy(result["strategy"], result["total_reward"])
+                    memory.save()
+                except Exception as mem_err:
+                    print(f"  [WARN] Memory update failed: {mem_err}")
 
         all_results.append(round_results)
 
