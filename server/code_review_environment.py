@@ -733,10 +733,10 @@ class CodeReviewEnvironment(
 
         # ── Clamp total reward to strictly (0, 1) ────────────────────
         # The validator requires each task score to be in the open
-        # interval (0.0, 1.0).  Adjust done_reward so that the final
-        # total_reward lands inside (0.001, 0.999).
+        # interval (0.0, 1.0).  Use 0.01/0.99 so that the value
+        # survives :.2f formatting without rounding to 0.00 or 1.00.
         projected_total = state.total_reward + done_reward
-        clamped_total = max(0.001, min(0.999, projected_total))
+        clamped_total = max(0.01, min(0.99, projected_total))
         done_reward += clamped_total - projected_total
 
         step_reward += done_reward
