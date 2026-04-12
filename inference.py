@@ -516,8 +516,9 @@ def _emit_step(
     """
     err_str = error if error else "null"
     done_str = "true" if done else "false"
-    if done:
-        reward = max(0.01, min(0.99, reward))
+    # Keep emitted rewards strictly in (0, 1) for validator safety, even
+    # on intermediate steps where the environment reward may be negative.
+    reward = _clamp_score(reward)
     print(
         f"[STEP] step={step_num} action={action} reward={reward:.2f} done={done_str} error={err_str}",
         flush=True,
@@ -892,6 +893,7 @@ def _build_result(
     fix_results: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Build a structured result dict for memory updates."""
+    total_reward = _clamp_score(total_reward)
     # Parse final feedback to extract matched/missed/FP info
     parsed = parse_step_feedback(feedback)
 
@@ -1017,7 +1019,7 @@ def main():
             scores = []
             for r in all_results:
                 res = r.get(task_id, {})
-                scores.append(res.get("total_reward", 0.0))
+                scores.append(_clamp_score(res.get("total_reward", 0.01)))
             trend = " -> ".join(f"{s:.3f}" for s in scores)
             improved = scores[-1] > scores[0] if len(scores) > 1 else False
             marker = " ^" if improved else ""
@@ -1028,15 +1030,15 @@ def main():
     total_score = 0.0
     count = 0
     for task_id, result in final_round.items():
-        score = result.get("total_reward", 0.0)
+        score = _clamp_score(result.get("total_reward", 0.01))
         strategy = result.get("strategy", "?")
         total_score += score
         count += 1
         print(f"  {task_id:12s}: {score:+.3f}  (strategy: {strategy})")
 
     if count > 0:
-        print(f"\n  Average score: {total_score / count:.3f}")
-        print(f"  Total score:   {total_score:.3f}")
+        print(f"\n  Average task reward: {total_score / count:.3f}")
+        print(f"  Aggregate task reward: {total_score:.3f}")
 
     # Strategy performance
     print(f"\n  {memory.get_strategy_summary()}")
