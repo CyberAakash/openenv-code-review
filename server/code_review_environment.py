@@ -816,6 +816,12 @@ class CodeReviewEnvironment(
         analysis: str = "",
         fix_feedback: Optional[Dict[str, Any]] = None,
     ) -> CodeReviewObservation:
+        # When the episode is done the reward IS the final task score and
+        # must be strictly in (0, 1).  Apply a last-resort clamp so that
+        # any code path that skips _finalize_episode's clamping still
+        # produces a valid score.
+        if state.done:
+            reward = max(0.01, min(0.99, reward))
         return CodeReviewObservation(
             reward=reward,
             done=state.done,
